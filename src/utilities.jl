@@ -1,6 +1,13 @@
 import StatsBase.predict
 
-abstract type AbstractSystem end
+export AbstractSys, AbstractSystem, AbstractDiffSystem, AbstractVelSystem
+export System, DiffSystem, VelSystem
+export simulate, predict, jacobians
+
+abstract type AbstractSys end
+abstract type AbstractSystem <: AbstractSys end
+abstract type AbstractDiffSystem <: AbstractSys end
+abstract type AbstractVelSystem <: AbstractSys end
 
 @with_kw struct System{T} <: AbstractSystem
     m::T
@@ -8,7 +15,7 @@ abstract type AbstractSystem end
     n::Int
     h::Float64 = 1.0
 end
-function System(n,ns, num_params, activation, h=1)
+function System(n::Int,ns::Int, num_params::Int, activation::Function, h=1)
     ny = ns
     np = num_params
     m  = Chain(Dense(ns+n,np, activation), Dense(np, ny))
@@ -17,13 +24,13 @@ end
 (m::System)(x) = m.m(x)
 
 
-@with_kw struct DiffSystem{T} <: AbstractSystem
+@with_kw struct DiffSystem{T} <: AbstractDiffSystem
     m::T
     ns::Int
     n::Int
     h::Float64 = 1.0
 end
-function DiffSystem(n,ns, num_params, activation, h=1)
+function DiffSystem(n::Int,ns::Int, num_params::Int, activation::Function, h=1)
     ny = ns
     np = num_params
     m  = Chain(Dense(ns+n,np, activation), Dense(np, ny))
@@ -32,13 +39,13 @@ end
 (m::DiffSystem)(x) = m.m(x)+x[1:m.ns,:]
 
 
-@with_kw struct VelSystem{T} <: AbstractSystem
+@with_kw struct VelSystem{T} <: AbstractVelSystem
     m::T
     ns::Int
     n::Int
     h::Float64 = 1.0
 end
-function VelSystem(n,ns, num_params, activation, h=1)
+function VelSystem(n::Int,ns::Int, num_params::Int, activation::Function, h=1)
     ny = n
     np = num_params
     m = Chain(Dense(ns+n,np, activation),  Dense(np, ny))
@@ -46,16 +53,15 @@ function VelSystem(n,ns, num_params, activation, h=1)
 end
 (m::VelSystem)(x) = m.m(x)
 
-loss(m::AbstractSystem) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
+loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 
-const AbstractEnsembleSystem = Vector{<:AbstractSystem}
-const EnsembleSystem = Vector{System}
-const EnsembleDiffSystem = Vector{DiffSystem}
-const EnsembleVelSystem = Vector{VelSystem}
-# const EnsembleAffineSystem = Vector{AffineSystem}
+const AbstractEnsembleSystem = Vector{<:AbstractSys}
+const EnsembleSystem = Vector{<:AbstractSystem}
+const EnsembleDiffSystem = Vector{<:AbstractDiffSystem}
+const EnsembleVelSystem = Vector{<:AbstractVelSystem}
 
-xy(::Type{<:AbstractSystem}, x, N)     = (x[:,1:N], x[:,2:N+1])
-xy(::Type{VelSystem}, x, N)  = (x[:,1:N], x[3:4,2:N+1])
+xy(::Type{<:AbstractSys}, x, N)        = (x[:,1:N], x[:,2:N+1])
+xy(::Type{<:AbstractVelSystem}, x, N)  = (x[:,1:N], x[3:4,2:N+1]) # TODO magic numbers
 
 
 function get_minimum_loss(results, key)
@@ -79,9 +85,9 @@ function simulate(ms::EnsembleVelSystem,x, testmode=true)
     xsim = copy(x)
     for t = 2:size(x,2)
         xsimt = map(m->m(xsim[:,t-1]), ms)
-        h = ms[1].sys.h
-        xsim[1:2,t] = xsim[1:2,t-1] + h*xsim[3:4,t-1] # TODO: * sample time (h)
-        xsim[3:4,t] = mean(xsimt).data
+        h = ms[1].h
+        xsim[1:2,t] = xsim[1:2,t-1] + h*xsim[3:4,t-1] # TODO magic numbers
+        xsim[3:4,t] = mean(xsimt).data # TODO magic numbers
     end
     xsim[1:4,:]
 end
@@ -96,8 +102,8 @@ function StatsBase.predict(ms::EnsembleVelSystem, x, testmode=true)
     Flux.testmode!.(ms, testmode)
     y = map(m->m(x), ms)
     yh = mean(y).data
-    h = ms[1].sys.h
-    yh = [x[1:2,1].+h*cumsum(yh,2); yh] # TODO: * sample time (h)
+    h = ms[1].h
+    yh = [x[1:2,1] .+ h*cumsum(yh,2); yh] # TODO magic numbers
     bounds = getfield.(extrema(y), :data)
     yh, bounds
 end
@@ -111,14 +117,17 @@ end
 
 function Flux.jacobian(ms::EnsembleVelSystem, x, testmode=true)
     Flux.testmode!.(ms, testmode)
-    h = ms[1].sys.h
-    jacs = [[[I h*I h^2/2*eye(2)];Flux.jacobian(m,x)] for m in ms] # The h²/2*I in ∇ᵤ is an approximation since there are (very small) cross terms. TODO: hard coded sample time
+    h = ms[1].h
+    jacs = [[[I h*I h^2/2*eye(2)];Flux.jacobian(m,x)] for m in ms] # The h²/2*I in ∇ᵤ is an approximation since there are (very small) cross terms.
     jacmat = cat(3,jacs...)
     squeeze(mean(jacmat, 3), 3), squeeze(std(jacmat, 3), 3)
 end
 
+models(mt::ModelTrainer) = getindex.(mt.models, :m)
+models(systems::Vector{<:AbstractSys}) = getindex.(systems, :m)
 models(results::AbstractVector) = [r[:m] for r in results]
 models(results::Associative) = [r[:m]]
+
 
 function jacobians(results)
     @unpack x,u,modeltype = results[1]
@@ -150,12 +159,12 @@ function LTVModels.plot_eigvals(results, eval=false)
     @unpack x,u,modeltype = results[1]
     N = size(x,2)
     ms = models(results)
-    n = ms[1].n
+    @unpack n,h = ms[1]
     plot(layout=(2,1), ratio=:equal)
     for evalpoint = 1:10:N
         e = eigvals(jacobian(ms, x[:,evalpoint])[1][1:n,1:n])
         scatter!(real.(e), imag.(e), c=:blue, show=false, subplot=1)
-        e = log.(Complex.(e))/sys.h
+        e = log.(Complex.(e))/h
         scatter!(real.(e), imag.(e), c=:blue, show=false, subplot=2, legend=false)
         plot!(title="Eigenvalue spectrum")
     end
@@ -227,5 +236,5 @@ get_res(res,n) = getindex.(res,n)
 
 
 try
-foreach(treelike, [SystemD, DiffSystemD, VelSystemD, System, DiffSystem, VelSystem])
+foreach(treelike, [System, DiffSystem, VelSystem])
 end
