@@ -11,45 +11,45 @@ abstract type AbstractVelSystem <: AbstractSys end
 
 @with_kw struct System{T} <: AbstractSystem
     m::T
-    ns::Int
-    n::Int
+    nx::Int
+    nu::Int
     h::Float64 = 1.0
 end
-function System(n::Int,ns::Int, num_params::Int, activation::Function, h=1)
-    ny = ns
+function System(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    ny = nx
     np = num_params
-    m  = Chain(Dense(ns+n,np, activation), Dense(np, ny))
-    System(m, ns, n, h)
+    m  = Chain(Dense(nx+nu,np, activation), Dense(np, ny))
+    System(m, nx, nu, h)
 end
 (m::System)(x) = m.m(x)
 
 
 @with_kw struct DiffSystem{T} <: AbstractDiffSystem
     m::T
-    ns::Int
-    n::Int
+    nx::Int
+    nu::Int
     h::Float64 = 1.0
 end
-function DiffSystem(n::Int,ns::Int, num_params::Int, activation::Function, h=1)
-    ny = ns
+function DiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    ny = nx
     np = num_params
-    m  = Chain(Dense(ns+n,np, activation), Dense(np, ny))
-    DiffSystem(m, ns, n, h)
+    m  = Chain(Dense(nx+nu,np, activation), Dense(np, ny))
+    DiffSystem(m, nx, nu, h)
 end
-(m::DiffSystem)(x) = m.m(x)+x[1:m.ns,:]
+(m::DiffSystem)(x) = m.m(x)+x[1:m.nx,:]
 
 
 @with_kw struct VelSystem{T} <: AbstractVelSystem
     m::T
-    ns::Int
-    n::Int
+    nx::Int
+    nu::Int
     h::Float64 = 1.0
 end
-function VelSystem(n::Int,ns::Int, num_params::Int, activation::Function, h=1)
-    ny = n
+function VelSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    ny = nx
     np = num_params
-    m = Chain(Dense(ns+n,np, activation),  Dense(np, ny))
-    VelSystem(m, ns, n, h)
+    m = Chain(Dense(nx+nu,np, activation),  Dense(np, ny))
+    VelSystem(m, nx, nu, h)
 end
 (m::VelSystem)(x) = m.m(x)
 
@@ -72,7 +72,7 @@ end
 function simulate(ms::AbstractEnsembleSystem,x, testmode=true)
     Flux.testmode!.(ms, testmode)
     xsim = copy(x)
-    ns = ms[1].ns
+    ns = ms[1].nx
     for t = 2:size(x,2)
         xsimt = map(m->m(xsim[:,t-1]), ms)
         xsim[1:ns,t] = mean(xsimt).data
@@ -159,10 +159,10 @@ function LTVModels.plot_eigvals(results, eval=false)
     @unpack x,u,modeltype = results[1]
     N = size(x,2)
     ms = models(results)
-    @unpack n,h = ms[1]
+    @unpack nx,h = ms[1]
     plot(layout=(2,1), ratio=:equal)
     for evalpoint = 1:10:N
-        e = eigvals(jacobian(ms, x[:,evalpoint])[1][1:n,1:n])
+        e = eigvals(jacobian(ms, x[:,evalpoint])[1][1:nx,1:nx])
         scatter!(real.(e), imag.(e), c=:blue, show=false, subplot=1)
         e = log.(Complex.(e))/h
         scatter!(real.(e), imag.(e), c=:blue, show=false, subplot=2, legend=false)
@@ -176,18 +176,18 @@ end
 function eval_pred(results, eval=false)
     @unpack x,u,y,modeltype = results[1]
     ms = models(results)
-    ns = ms[1].ns
+    nx = ms[1].nx
     yh, bounds = predict(ms, x)
-    pred = rms(x[1:ns,2:end].-yh[:,1:end-1]) # TODO: check time alignment
+    pred = rms(x[1:nx,2:end].-yh[:,1:end-1]) # TODO: check time alignment
     pred
 end
 
 function eval_sim(results, eval=false)
     @unpack x,u,y,modeltype = results[1]
     ms = models(results)
-    ns = ms[1].ns
+    nx = ms[1].nx
     xh = simulate(ms, x)
-    sim = rms(x[1:ns,:].-xh) # TODO: check time alignment
+    sim = rms(x[1:nx,:].-xh) # TODO: check time alignment
     sim
 end
 
@@ -199,8 +199,8 @@ end
 function plotresults(results, eval=false)
     @unpack x,u,y,modeltype = results[1]
     ms = models(results)
-    ns = ms[1].ns
-    fig = plot(x[1:ns,2:end]', lab="True", layout=ns)
+    nx = ms[1].nx
+    fig = plot(x[1:nx,2:end]', lab="True", layout=nx)
     testmode!.(ms, true)
     plot_prediction(fig, results, eval)
     plot_simulation(fig, results, eval)
