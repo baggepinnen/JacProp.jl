@@ -39,9 +39,9 @@ function generate_data(sys::TwoLinkSys, seed, validation=false; ufun=u->filt(one
     x,u
 end
 
-function true_jacobian(sys::TwoLinkSys, evalpoint, x, u)
-    Jtrue = ReverseDiff.jacobian(x->time_derivative(x, u[:,evalpoint]), x[:,evalpoint])[:,1:4]
-    Jtrue = [Jtrue ReverseDiff.jacobian(u->time_derivative(x[:,evalpoint], u), u[:,evalpoint])]
+function true_jacobian(sys::TwoLinkSys, x::AbstractVector, u::AbstractVector)
+    Jtrue = ReverseDiff.jacobian(x->time_derivative(x, u), x)[:,1:4]
+    Jtrue = [Jtrue ReverseDiff.jacobian(u->time_derivative(x, u), u)]
     Jtrue = expm([sys.h*Jtrue;zeros(2,6)])[1:4,:] # Discretize
 end
 
@@ -59,6 +59,7 @@ num_params = 10
 wdecay     = 0
 stepsize   = 0.05
 sys        = TwoLinkSys(N=1000, h=0.02, σ0 = 0.1)
+true_jacobian(x,u) = true_jacobian(sys,x,u)
 nu         = sys.nu
 nx         = sys.nx
 models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
@@ -69,19 +70,26 @@ x,u = generate_data(sys, 1)
 
 t = Trajectory(x[:,1:end-1],u, x[:,2:end])
 push!(trainer,t)
-JacProp.train!(trainer, epochs=500, jacprop=1)
+train!(trainer, epochs=500, jacprop=1)
 
 x,u = generate_data(sys, 2)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
+trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=1)
 
 x,u = generate_data(sys, 3)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
+trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=1)
 
 x,u = generate_data(sys, 4)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
+trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=1)
 
-trainer(epochs=200, jacprop=0)
-trainer(epochs=500, jacprop=0)
+trainer(epochs=50, jacprop=1)
 trainer(epochs=500, jacprop=1)
+# trainer(epochs=500, jacprop=1)
 
-ui = JacProp.display_modeltrainer(trainer, size=(800,600))
+ui = display_modeltrainer(trainer, size=(800,600))
+jacplot(trainer.models, trainer.trajs[3], true_jacobian, ds=20)
+@gif for i = 1:length(t)
+    eigvalplot(trainer.models, trainer.trajs[1], true_jacobian, ds=20, onlyat=i)
+end
+
+# TODO: Sample points all over state-space and use as validation
+# TODO: regularize LTV with NN
