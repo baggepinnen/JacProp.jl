@@ -70,7 +70,7 @@ x,u = generate_data(sys, 1)
 
 t = Trajectory(x[:,1:end-1],u, x[:,2:end])
 push!(trainer,t)
-train!(trainer, epochs=500, jacprop=1)
+train!(trainer, epochs=500, jacprop=0)
 
 x,u = generate_data(sys, 2)
 trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=1)

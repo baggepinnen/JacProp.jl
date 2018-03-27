@@ -167,8 +167,7 @@ function eval_sim(results, eval=false)
     sim
 end
 
-function eval_jac(results, eval=false)
-    Jm, Js, Jtrue = all_jacobians(results, eval)
+function eval_jac(Jm, Jtrue)
     sqrt(mean(abs2, Jm .- Jtrue))
 end
 

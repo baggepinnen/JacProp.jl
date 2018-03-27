@@ -1,6 +1,6 @@
 
-@recipe function plot_Trajectory(t::Trajectory; filtering=0)
-    layout --> (2,1)
+@recipe function plot_Trajectory(t::Trajectory; filtering=0, control=true)
+    layout --> control ? (2,1) : 1
     show --> false
     @series begin
         title --> "States"
@@ -8,13 +8,14 @@
         subplot --> 1
         filtering > 0 ? filt(ones(filtering),[filtering], t.x') : t.x'
     end
-    @series begin
+    control && @series begin
         title --> "Control signal"
         xlabel --> "Time"
         subplot --> 2
         filtering > 0 ? filt(ones(filtering),[filtering], t.u') : t.u'
     end
     delete!(plotattributes, :filtering)
+    delete!(plotattributes, :control)
     nothing
 end
 
@@ -178,3 +179,35 @@ end
     delete!(plotattributes, :cont)
     nothing
 end
+
+
+@userplot MutRegPlot
+@recipe function mutregplot(h::MutRegPlot)
+    @assert length(h.args) == 3 "Call with (mt::ModelTrainer, t::Trajectory, true_jacobian::(x,u)->J)"
+    mt               = h.args[1]
+    t                = h.args[2]
+    truejacfun       = h.args[3]
+    @unpack x,u      = t
+    @unpack R1,R2,P0 = mt
+
+    errorhistory = map(mt.modelhistory) do ms
+        ltvmodel = LTVModels.fit_model(LTVModels.KalmanModel, x,u,R1,R2,P0, extend=true)
+        error_nn = 0.
+        error_ltv = 0.
+        for (i,xu) in enumerate(t)
+            xi,ui = xu
+            Jtrue = truejacfun(xi,ui)
+            Jm, Js = jacobian(ms, [xi;ui])
+            error_nn += eval_jac(Jm, Jtrue)
+            error_ltv += eval_jac([ltvmodel.At[:,:,i] ltvmodel.Bt[:,:,i]], Jtrue)
+        end
+        error_nn, error_ltv
+    end
+    seriestype --> :scatter
+    title --> "Jacobian error"
+    xlabel --> "Number of training sessions"
+    ylims --> (0, Inf)
+    @series (label := "NN"; getindex.(errorhistory,1))
+    @series (label := "LTV"; getindex.(errorhistory,2))
+end
+using StatPlots

@@ -30,6 +30,12 @@ const default_activations = [swish, Flux.sigmoid, tanh, elu]
 end
 Base.length(t::Trajectory) = size(t.x,2)
 
+Base.start(t::Trajectory) = 1
+Base.next(t::Trajectory, state) = ((t.x[:,state], t.u[:,state]), state+1)
+Base.done(t::Trajectory, state) = state == length(t)
+
+
+
 """
 ModelTrainer
 
