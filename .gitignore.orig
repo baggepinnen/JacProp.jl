@@ -1,0 +1,7 @@
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+<<<<<<< HEAD
+=======
+deps/deps.jl
+>>>>>>> 870de39d2996d6c1132d0c76212d91a44ea5be7b

@@ -91,5 +91,8 @@ jacplot(trainer.models, trainer.trajs[3], true_jacobian, ds=20)
     eigvalplot(trainer.models, trainer.trajs[1], true_jacobian, ds=20, onlyat=i)
 end
 
+mutregplot(trainer, t, true_jacobian); gui()
+
 # TODO: Sample points all over state-space and use as validation
-# TODO: regularize LTV with NN
+# TODO: regularize LTV with NN in actual learning
+# TODO: save LTVmodel in modeltrainer
