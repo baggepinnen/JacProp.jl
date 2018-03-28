@@ -3,7 +3,7 @@ module JacProp
 export Trajectory, default_activations, ModelTrainer, sample_jacprop, push!, train!, display_modeltrainer
 
 using LTVModelsBase, Parameters, ForwardDiff, StatsBase, Reexport, Lazy, Juno
-@reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils
+@reexport using LTVModels, Flux, ValueHistories, InterTools, MLDataUtils
 using Flux: back!, truncate!, treelike, train!, mse, testmode!, params, jacobian, throttle
 using Flux.Optimise: Param, optimiser, RMSProp, expdecay
 
@@ -53,11 +53,11 @@ See also [`ModelTrainer`](@ref)
 """
 function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1)
     @unpack models,opts,losses,trajs = mt
-    data = todata(mt)
-    data = reduce(vcat, data, [todata(sample_jacprop(mt)) for i = 1:jacprop])
+    data1 = todata(mt)
+    data = chain(data1, ncycle(todata(sample_jacprop(mt)), jacprop))
     dataset = ncycle(data, epochs)
     for (loss, opt) in zip(losses,opts)
-        train!(loss, dataset, opt, cb=to_callback(mt.cb,loss,data))
+        train!(loss, dataset, opt, cb=to_callback(mt.cb,loss,data1))
     end
     push!(mt.modelhistory, deepcopy(models))
 end

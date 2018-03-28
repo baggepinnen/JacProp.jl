@@ -67,23 +67,15 @@ models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
 trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10)
-x,u = generate_data(sys, 1)
 
-t = Trajectory(x, u)
-push!(trainer,t)
-train!(trainer, epochs=500, jacprop=1)
 
-x,u = generate_data(sys, 2)
-trainer(x, u, epochs=100, jacprop=1)
+for i = 1:3
+    t = generate_data(sys, i) |> Trajectory
+    trainer(epochs=500, jacprop=0)
+end
 
-x,u = generate_data(sys, 3)
-trainer(x, u, epochs=100, jacprop=0)
-
-x,u = generate_data(sys, 4)
-trainer(x, u, epochs=100, jacprop=0)
-
-trainer(epochs=100, jacprop=1)
-trainer(epochs=500, jacprop=1)
+trainer(epochs=500, jacprop=0)
+trainer(epochs=500, jacprop=0)
 # trainer(epochs=500, jacprop=1)
 mutregplot(trainer, true_jacobian)
 ##
@@ -98,4 +90,4 @@ end
 # TODO: Move Trajectory to LTVModelsBase and implement predict(t::Trajectory) for KalmanModel
 # TODO: see if error during first two iterations, when number of trajs is small, is smaller using jacprop
 # TODO: make jacprop magnitude an option std()/10
-# TODO: sample new jacprop each epoch
+# TODO: Ensembles.jl
