@@ -1,6 +1,6 @@
 module JacProp
 
-export default_activations, ModelTrainer, sample_jackprop, push!, train!, display_modeltrainer
+export Trajectory, default_activations, ModelTrainer, sample_jacprop, push!, train!, display_modeltrainer
 
 using LTVModelsBase, Parameters, ForwardDiff, StatsBase, Reexport, Lazy, Juno
 @reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils
@@ -54,7 +54,7 @@ See also [`ModelTrainer`](@ref)
 function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1)
     @unpack models,opts,losses,trajs = mt
     data = todata(mt)
-    data = reduce(vcat, data, [todata(sample_jackprop(mt)) for i = 1:jacprop])
+    data = reduce(vcat, data, [todata(sample_jacprop(mt)) for i = 1:jacprop])
     dataset = ncycle(data, epochs)
     for (loss, opt) in zip(losses,opts)
         train!(loss, dataset, opt, cb=to_callback(mt.cb,loss,data))
@@ -62,7 +62,7 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1)
     push!(mt.modelhistory, deepcopy(models))
 end
 
-function sample_jackprop(mt::ModelTrainer)
+function sample_jacprop(mt::ModelTrainer)
     modeltype = typeof(mt.models[1])
     @unpack R1,R2,P0 = mt
     perturbed_trajs = map(mt.trajs) do traj
@@ -76,17 +76,22 @@ function sample_jackprop(mt::ModelTrainer)
     end
 end
 
-function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models; P=mt.P)
+function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models;
+    P=mt.P, useprior=!isempty(mt.modelhistory))
     @unpack x,u,nx,nu = t
     @unpack R1,R2,P0  = mt
     T                 = length(t)
-    model = KalmanModel(zeros(nx,nx,T),zeros(nx,nu,T),zeros(1,1,T),false)
-    Jm, Js = jacobians(ms, t)
-    Pt       = cat(3,[diagm(1000Js[:,i].^2 .+ 1e-3) for i=1:T]...) # TODO: magic number
-    fx       = cat(3,[reshape(Jm[1:nx^2,i], nx,nx) for i=1:T]...)
-    fu       = cat(3,[reshape(Jm[nx^2+1:end,i], nx,nu) for i=1:T]...)
-    prior    = KalmanModel(fx,fu,Pt,false)
-    ltvmodel = KalmanModel(model, prior, x,u,R1,R2,P0, extend = true)
+    if useprior
+        model = KalmanModel(zeros(nx,nx,T),zeros(nx,nu,T),zeros(1,1,T),false)
+        Jm, Js = jacobians(ms, t)
+        Pt       = cat(3,[diagm(Js[:,i].^2 .+ P) for i=1:T]...) # TODO: magic number
+        fx       = cat(3,[reshape(Jm[1:nx^2,i], nx,nx) for i=1:T]...)
+        fu       = cat(3,[reshape(Jm[nx^2+1:end,i], nx,nu) for i=1:T]...)
+        prior    = KalmanModel(fx,fu,Pt,false)
+        ltvmodel = KalmanModel(model, prior, x,u,R1,R2,P0, extend = true)
+    else # Don't use prior if it's the first time training
+        ltvmodel = KalmanModel(x,u,R1,R2,P0, extend = true)
+    end
 end
 
 todata(trajs::Vector{Trajectory}) = [(traj.xu,traj.y) for traj in trajs]

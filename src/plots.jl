@@ -183,29 +183,43 @@ end
 
 @userplot MutRegPlot
 @recipe function mutregplot(h::MutRegPlot)
-    @assert length(h.args) == 3 "Call with (mt::ModelTrainer, t::Trajectory, true_jacobian::(x,u)->J)"
-    mt                = h.args[1]
-    t                 = h.args[2]
-    truejacfun        = h.args[3]
+    @assert length(h.args) >= 2 "Call with (mt::ModelTrainer, t::Trajectory, true_jacobian::(x,u)->J)\n or (mt::ModelTrainer, true_jacobian::(x,u)->J"
+    mt         = h.args[1]
+    manytrajs  = length(h.args) == 2
+    if manytrajs
+        t          = mt.trajs
+        truejacfun = h.args[2]
+    else
+        t          = [h.args[2]]
+        truejacfun = h.args[3]
+    end
 
     errorhistory = map(mt.modelhistory) do ms
-        ltvmodel = KalmanModel(mt,t, ms, P = 1000)
-        error_nn = 0.
-        error_ltv = 0.
-        for (i,xu) in enumerate(t)
-            xi,ui = xu
-            Jtrue = truejacfun(xi,ui)
-            Jm, Js = jacobian(ms, [xi;ui])
-            error_nn += eval_jac(Jm, Jtrue)
-            error_ltv += eval_jac([ltvmodel.At[:,:,i] ltvmodel.Bt[:,:,i]], Jtrue)
+        map(t) do t
+            ltvmodel = KalmanModel(mt, t, ms)
+            error_nn = 0.
+            error_ltv = 0.
+            for (i,xu) in enumerate(t)
+                xi,ui = xu
+                Jtrue = truejacfun(xi,ui)
+                Jm, Js = jacobian(ms, [xi;ui])
+                error_nn += eval_jac(Jm, Jtrue)
+                error_ltv += eval_jac([ltvmodel.At[:,:,i] ltvmodel.Bt[:,:,i]], Jtrue)
+            end
+            error_nn, error_ltv
         end
-        error_nn, error_ltv
     end
-    seriestype --> :scatter
     title --> "Jacobian error"
     xlabel --> "Number of training sessions"
     ylims --> (0, Inf)
     N = length(errorhistory)
-    @series (label := "NN"; ((1:N) .- 0.1, getindex.(errorhistory,1)))
-    @series (label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
+    errorhistory = [errorhistory[mi][ti] for mi in 1:N, ti in eachindex(errorhistory[1])]
+    if manytrajs
+        seriestype --> :scatter
+    else
+        seriestype --> :scatter
+    end
+    c1,c2 = :red, :blue
+    @series (color := c1;label := "NN"; ((1:N) .- 0.1, getindex.(errorhistory,1)))
+    @series (color := c2;label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
 end

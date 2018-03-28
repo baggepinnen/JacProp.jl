@@ -62,29 +62,30 @@ sys        = TwoLinkSys(N=1000, h=0.02, σ0 = 0.1)
 true_jacobian(x,u) = true_jacobian(sys,x,u)
 nu         = sys.nu
 nx         = sys.nx
+##
 models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10_1000)
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10)
 x,u = generate_data(sys, 1)
 
-t = Trajectory(x[:,1:end-1],u, x[:,2:end])
+t = Trajectory(x, u)
 push!(trainer,t)
-train!(trainer, epochs=500, jacprop=0)
+train!(trainer, epochs=500, jacprop=1)
 
 x,u = generate_data(sys, 2)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
+trainer(x, u, epochs=100, jacprop=1)
 
 x,u = generate_data(sys, 3)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
+trainer(x, u, epochs=100, jacprop=0)
 
 x,u = generate_data(sys, 4)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
+trainer(x, u, epochs=100, jacprop=0)
 
-trainer(epochs=50, jacprop=0)
+trainer(epochs=100, jacprop=1)
 trainer(epochs=500, jacprop=1)
 # trainer(epochs=500, jacprop=1)
-mutregplot(trainer, t, true_jacobian); closeall();gui()
+mutregplot(trainer, true_jacobian)
 ##
 ui = display_modeltrainer(trainer, size=(800,600))
 jacplot(trainer.models, trainer.trajs[3], true_jacobian, ds=20)
@@ -95,3 +96,6 @@ end
 
 # TODO: Sample points all over state-space and use as validation
 # TODO: Move Trajectory to LTVModelsBase and implement predict(t::Trajectory) for KalmanModel
+# TODO: see if error during first two iterations, when number of trajs is small, is smaller using jacprop
+# TODO: make jacprop magnitude an option std()/10
+# TODO: sample new jacprop each epoch
