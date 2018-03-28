@@ -187,19 +187,9 @@ end
     mt                = h.args[1]
     t                 = h.args[2]
     truejacfun        = h.args[3]
-    @unpack x,u,nx,nu = t
-    @unpack R1,R2,P0  = mt
-    T                 = length(t)
 
     errorhistory = map(mt.modelhistory) do ms
-        model = KalmanModel(zeros(nx,nx,T),zeros(nx,nu,T),zeros(1,1,T),false)
-        Jm, Js = jacobians(ms, t)
-        Pt       = cat(3,[diagm(1000Js[:,i].^2) for i=1:T]...)
-        fx       = cat(3,[reshape(Jm[1:nx^2,i], nx,nx) for i=1:T]...)
-        fu       = cat(3,[reshape(Jm[nx^2+1:end,i], nx,nu) for i=1:T]...)
-        prior    = KalmanModel(fx,fu,Pt,false)
-        ltvmodel = LTVModels.fit_model!(model, prior, x,u,R1,R2,P0, extend = true)
-
+        ltvmodel = KalmanModel(mt,t, ms, P = 1000)
         error_nn = 0.
         error_ltv = 0.
         for (i,xu) in enumerate(t)
@@ -216,6 +206,6 @@ end
     xlabel --> "Number of training sessions"
     ylims --> (0, Inf)
     N = length(errorhistory)
-    @series (label := "NN"; ((1:N) .- 0.2, getindex.(errorhistory,1)))
-    @series (label := "LTV"; ((1:N) .+ 0.2, getindex.(errorhistory,2)))
+    @series (label := "NN"; ((1:N) .- 0.1, getindex.(errorhistory,1)))
+    @series (label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
 end

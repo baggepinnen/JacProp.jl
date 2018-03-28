@@ -1,8 +1,8 @@
 module JacProp
 
-export default_activations, Trajectory, ModelTrainer, sample_jackprop, push!, train!, display_modeltrainer
+export default_activations, ModelTrainer, sample_jackprop, push!, train!, display_modeltrainer
 
-using Parameters, ForwardDiff, StatsBase, Reexport, Lazy, Juno
+using LTVModelsBase, Parameters, ForwardDiff, StatsBase, Reexport, Lazy, Juno
 @reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils
 using Flux: back!, truncate!, treelike, train!, mse, testmode!, params, jacobian, throttle
 using Flux.Optimise: Param, optimiser, RMSProp, expdecay
@@ -11,28 +11,6 @@ using Plots, InteractNext, Observables, DataStructures
 
 const default_activations = [swish, Flux.sigmoid, tanh, elu]
 
-@with_kw mutable struct Trajectory
-    x::Matrix{Float64}
-    u::Matrix{Float64}
-    y::Matrix{Float64}
-    xu::Matrix{Float64}
-    nx::Int
-    nu::Int
-    function Trajectory(x,u)
-        @assert size(x,2) == size(u,2) "The second dimension of x and u (time) must be the same"
-        x,u,y = x[:,1:end-1],u[:,1:end-1],y[:,2:end]
-        new(x,u,y,[x;u],size(x,1), size(u,1))
-    end
-    function Trajectory(x,u,y)
-        @assert size(x,2) == size(u,2) == size(y,2) "The second dimension of x,u and y (time) must be the same"
-        new(x,u,y,[x;u],size(x,1), size(u,1))
-    end
-end
-Base.length(t::Trajectory) = size(t.x,2)
-
-Base.start(t::Trajectory) = 1
-Base.next(t::Trajectory, state) = ((t.x[:,state], t.u[:,state]), state+1)
-Base.done(t::Trajectory, state) = state == length(t)
 
 
 
@@ -45,9 +23,10 @@ ModelTrainer
 - `R1` Parameter drift covariance for Kalman smoother
 - `R2` Measurement noise covariance
 - `P0` Initial covariance matrix for Kalman smoother
+- `P` Covariance magnification of NN prior
 - `cb` can be either `()->()` or a a Function that creates a closure around `loss` and `data` (loss,data)->(()->())
 
-See also [`LTVModels`](@ref), [`LTVModels.fit_model`](@ref), [`LTVModels.KalmanModel`](@ref)
+See also [`LTVModels`](@ref),  [`LTVModels.KalmanModel`](@ref)
 """
 @with_kw mutable struct ModelTrainer{cbT}
     models
@@ -56,6 +35,7 @@ See also [`LTVModels`](@ref), [`LTVModels.fit_model`](@ref), [`LTVModels.KalmanM
     R1 = I
     R2 = 10_000I
     P0 = 10_000I
+    P  = 10_000
     trajs::Vector{Trajectory} = Trajectory[]
     cb::cbT
     modelhistory = []
@@ -87,12 +67,26 @@ function sample_jackprop(mt::ModelTrainer)
     @unpack R1,R2,P0 = mt
     perturbed_trajs = map(mt.trajs) do traj
         @unpack x,u,nx,nu = traj
-        ltvmodel = LTVModels.fit_model(LTVModels.KalmanModel, x,u,R1,R2,P0, extend=true)
+        ltvmodel = KalmanModel(mt, traj, P = 1000)
+        # ltvmodel = KalmanModel(x,u,R1,R2,P0, extend=true)
         xa = x .+ std(x,2)/10 .* randn(size(x))
         ua = u .+ std(u,2)/10 .* randn(size(u))
         ya = LTVModels.predict(ltvmodel, xa, ua)
         Trajectory(xa,ua,ya)
     end
+end
+
+function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models; P=mt.P)
+    @unpack x,u,nx,nu = t
+    @unpack R1,R2,P0  = mt
+    T                 = length(t)
+    model = KalmanModel(zeros(nx,nx,T),zeros(nx,nu,T),zeros(1,1,T),false)
+    Jm, Js = jacobians(ms, t)
+    Pt       = cat(3,[diagm(1000Js[:,i].^2 .+ 1e-3) for i=1:T]...) # TODO: magic number
+    fx       = cat(3,[reshape(Jm[1:nx^2,i], nx,nx) for i=1:T]...)
+    fu       = cat(3,[reshape(Jm[nx^2+1:end,i], nx,nu) for i=1:T]...)
+    prior    = KalmanModel(fx,fu,Pt,false)
+    ltvmodel = KalmanModel(model, prior, x,u,R1,R2,P0, extend = true)
 end
 
 todata(trajs::Vector{Trajectory}) = [(traj.xu,traj.y) for traj in trajs]

@@ -65,7 +65,7 @@ nx         = sys.nx
 models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker)
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10_1000)
 x,u = generate_data(sys, 1)
 
 t = Trajectory(x[:,1:end-1],u, x[:,2:end])
@@ -73,26 +73,25 @@ push!(trainer,t)
 train!(trainer, epochs=500, jacprop=0)
 
 x,u = generate_data(sys, 2)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=1)
+trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
 
 x,u = generate_data(sys, 3)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=1)
+trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
 
 x,u = generate_data(sys, 4)
-trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=1)
+trainer(x[:,1:end-1],u, x[:,2:end], epochs=100, jacprop=0)
 
-trainer(epochs=50, jacprop=1)
+trainer(epochs=50, jacprop=0)
 trainer(epochs=500, jacprop=1)
 # trainer(epochs=500, jacprop=1)
-
+mutregplot(trainer, t, true_jacobian); closeall();gui()
+##
 ui = display_modeltrainer(trainer, size=(800,600))
 jacplot(trainer.models, trainer.trajs[3], true_jacobian, ds=20)
 @gif for i = 1:length(t)
     eigvalplot(trainer.models, trainer.trajs[1], true_jacobian, ds=20, onlyat=i)
 end
 
-mutregplot(trainer, t, true_jacobian); gui()
 
 # TODO: Sample points all over state-space and use as validation
-# TODO: regularize LTV with NN in actual learning
-# TODO: save LTVmodel in modeltrainer
+# TODO: Move Trajectory to LTVModelsBase and implement predict(t::Trajectory) for KalmanModel

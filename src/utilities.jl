@@ -4,7 +4,7 @@ export AbstractSys, AbstractSystem, AbstractDiffSystem, AbstractVelSystem
 export System, DiffSystem, VelSystem
 export simulate, predict, jacobians
 
-abstract type AbstractSys end
+abstract type AbstractSys <: LTVModelsBase.AbstractModel end
 abstract type AbstractSystem <: AbstractSys end
 abstract type AbstractDiffSystem <: AbstractSys end
 abstract type AbstractVelSystem <: AbstractSys end
