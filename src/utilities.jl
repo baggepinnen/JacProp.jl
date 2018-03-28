@@ -115,7 +115,7 @@ StatsBase.predict(ms, t::Trajectory; kwargs...) = StatsBase.predict(ms, t.xu; kw
 function Flux.jacobian(ms::AbstractEnsembleSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
     jacs = [Flux.jacobian(m,x) for m in ms]
-    jacmat = cat(3,jacs...)
+    jacmat = smartcat3(jacs)
     squeeze(mean(jacmat, 3), 3), squeeze(std(jacmat, 3), 3)
 end
 
@@ -123,7 +123,7 @@ function Flux.jacobian(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
     h = ms[1].h
     jacs = [[[I h*I h^2/2*eye(2)];Flux.jacobian(m,x)] for m in ms] # The h²/2*I in ∇ᵤ is an approximation since there are (very small) cross terms.
-    jacmat = cat(3,jacs...)
+    jacmat = smartcat3(jacs)
     squeeze(mean(jacmat, 3), 3), squeeze(std(jacmat, 3), 3)
 end
 
@@ -142,8 +142,8 @@ function jacobians(ms, t, ds=1)
         Jm, Js = jacobian(ms, xu[:,evalpoint])
         Jm[:], Js[:]
     end
-    Jm = hcat(getindex.(J,1)...)
-    Js = hcat(getindex.(J,2)...)
+    Jm = smartcat2(getindex.(J,1))
+    Js = smartcat2(getindex.(J,2))
     Jm, Js
 end
 
@@ -187,4 +187,22 @@ get_res(res,n) = getindex.(res,n)
 
 try
 foreach(treelike, [System, DiffSystem, VelSystem])
+end
+
+function smartcat2(vv)
+    dim2 = length(vv)
+    dim1 = length(vv[1])
+    A = zeros(dim1,dim2)
+    for i in eachindex(vv)
+        A[:,i] = vv[i]
+    end
+end
+
+function smartcat3(vv)
+    dim3 = length(vv)
+    dim1,dim2 = size(vv[1])
+    A = zeros(dim1,dim2,dim3)
+    for i in eachindex(vv)
+        A[:,:,i] = vv[i]
+    end
 end
