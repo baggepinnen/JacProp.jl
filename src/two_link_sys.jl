@@ -70,13 +70,14 @@ trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(mod
 
 
 for i = 1:3
-    t = generate_data(sys, i) |> Trajectory
-    trainer(epochs=500, jacprop=0)
+    t = Trajectory(generate_data(sys, i)...)
+    trainer(t, epochs=50, jacprop=0)
 end
 
-trainer(epochs=500, jacprop=0)
-trainer(epochs=500, jacprop=0)
+trainer(epochs=50, jacprop=1)
+trainer(epochs=50, jacprop=1)
 # trainer(epochs=500, jacprop=1)
+plotly()
 mutregplot(trainer, true_jacobian)
 ##
 ui = display_modeltrainer(trainer, size=(800,600))

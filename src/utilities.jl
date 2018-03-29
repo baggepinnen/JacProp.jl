@@ -74,7 +74,7 @@ function simulate(ms::AbstractEnsembleSystem,x::AbstractArray, testmode=true)
     xsim = copy(x)
     ns = ms[1].nx
     for t = 2:size(x,2)
-        xsimt = map(m->m(xsim[:,t-1]), ms)
+        @ensemble xsimt = ms(xsim[:,t-1])
         xsim[1:ns,t] = mean(xsimt).data
     end
     xsim[1:ns,:]
@@ -84,7 +84,7 @@ function simulate(ms::EnsembleVelSystem,x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
     xsim = copy(x)
     for t = 2:size(x,2)
-        xsimt = map(m->m(xsim[:,t-1]), ms)
+        @ensemble xsimt = ms(xsim[:,t-1])
         h = ms[1].h
         xsim[1:2,t] = xsim[1:2,t-1] + h*xsim[3:4,t-1] # TODO magic numbers
         xsim[3:4,t] = mean(xsimt).data # TODO magic numbers
@@ -96,13 +96,13 @@ simulate(ms, t::Trajectory; kwargs...) = simulate(ms, t.xu; kwargs...)
 
 function StatsBase.predict(ms::AbstractEnsembleSystem, x::AbstractMatrix, testmode=true)
     Flux.testmode!.(ms, testmode)
-    y = map(m->m(x), ms)
+    @ensemble y = ms(x)
     mean(y).data, getfield.(extrema(y), :data)
 end
 
 function StatsBase.predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
-    y = map(m->m(x), ms)
+    @ensemble y = ms(x)
     yh = mean(y).data
     h = ms[1].h
     yh = [x[1:2,1] .+ h*cumsum(yh,2); yh] # TODO magic numbers
@@ -146,8 +146,6 @@ function jacobians(ms, t, ds=1)
     Js = smartcat2(getindex.(J,2))
     Jm, Js
 end
-
-
 
 function eval_pred(results, eval=false)
     @unpack x,u,y,modeltype = results[1]
@@ -196,6 +194,7 @@ function smartcat2(vv)
     for i in eachindex(vv)
         A[:,i] = vv[i]
     end
+    A
 end
 
 function smartcat3(vv)
@@ -205,4 +204,5 @@ function smartcat3(vv)
     for i in eachindex(vv)
         A[:,:,i] = vv[i]
     end
+    A
 end

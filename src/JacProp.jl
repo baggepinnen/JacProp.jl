@@ -2,15 +2,15 @@ module JacProp
 
 export Trajectory, default_activations, ModelTrainer, sample_jacprop, push!, train!, display_modeltrainer
 
-using LTVModelsBase, Parameters, ForwardDiff, StatsBase, Reexport, Lazy, Juno
-@reexport using LTVModels, Flux, ValueHistories, InterTools, MLDataUtils
+using LTVModelsBase, Parameters, ForwardDiff, StatsBase, Reexport, Lazy, Juno, FunctionEnsembles
+@reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils
 using Flux: back!, truncate!, treelike, train!, mse, testmode!, params, jacobian, throttle
 using Flux.Optimise: Param, optimiser, RMSProp, expdecay
 
 using Plots, InteractNext, Observables, DataStructures
 
 const default_activations = [swish, Flux.sigmoid, tanh, elu]
-
+const IT = IterTools
 
 
 
@@ -52,23 +52,34 @@ train!(mt::ModelTrainer; epochs=1, jacprop=1)
 See also [`ModelTrainer`](@ref)
 """
 function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1)
+    @assert !isempty(mt.trajs) "No data in ModelTrainer"
     @unpack models,opts,losses,trajs = mt
     data1 = todata(mt)
-    data = chain(data1, ncycle(todata(sample_jacprop(mt)), jacprop))
-    dataset = ncycle(data, epochs)
-    for (loss, opt) in zip(losses,opts)
-        train!(loss, dataset, opt, cb=to_callback(mt.cb,loss,data1))
+    ltvmodels = fit_models(mt)
+    Flux.@epochs epochs begin
+        data2 = [todata(sample_jacprop(mt, ltvmodels)) for i = 1:jacprop]
+        data = chain(data1, data2...)
+        for (loss, opt) in zip(losses,opts)
+            train!(loss, data, opt, cb=to_callback(mt.cb,loss,data1))
+        end
     end
     push!(mt.modelhistory, deepcopy(models))
 end
 
-function sample_jacprop(mt::ModelTrainer)
+function fit_models(mt::ModelTrainer)
     modeltype = typeof(mt.models[1])
     @unpack R1,R2,P0 = mt
-    perturbed_trajs = map(mt.trajs) do traj
+    map(mt.trajs) do traj
         @unpack x,u,nx,nu = traj
-        ltvmodel = KalmanModel(mt, traj, P = 1000)
-        # ltvmodel = KalmanModel(x,u,R1,R2,P0, extend=true)
+        ltvmodel = KalmanModel(mt, traj)
+    end
+end
+
+function sample_jacprop(mt::ModelTrainer, models)
+    modeltype = typeof(mt.models[1])
+    @unpack R1,R2,P0 = mt
+    perturbed_trajs = map(mt.trajs, models) do traj, ltvmodel
+        @unpack x,u,nx,nu = traj
         xa = x .+ std(x,2)/10 .* randn(size(x))
         ua = u .+ std(u,2)/10 .* randn(size(u))
         ya = LTVModels.predict(ltvmodel, xa, ua)
