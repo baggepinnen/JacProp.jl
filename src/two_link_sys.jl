@@ -55,31 +55,67 @@ end
 
 
 
-num_params = 10
+num_params = 20
 wdecay     = 0
 stepsize   = 0.05
 sys        = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
 true_jacobian(x,u) = true_jacobian(sys,x,u)
 nu         = sys.nu
 nx         = sys.nx
-##
+
+## Generate validation data
+function valdata()
+    vx,vu,vy = Vector{Float64}[],Vector{Float64}[],Vector{Float64}[]
+    for i = 20:100
+        x,u = generate_data(sys,i, true)
+        for j in 1:100:(sys.N-1)
+            push!(vx, x[:,j])
+            push!(vy, x[:,j+1])
+            push!(vu, u[:,j])
+        end
+    end
+    hcat(vx...),hcat(vu...),hcat(vy...)
+end
+vx,vu,vy = valdata()
+vt = Trajectory(vx,vu,vy)
+
+## Without jacprop
+srand(1)
 models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10)
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 2)
 
 
 for i = 1:3
     t = Trajectory(generate_data(sys, i)...)
-    trainer(t, epochs=50, jacprop=0)
+    trainer(t, epochs=1600, jacprop=0)
 end
 
-trainer(epochs=50, jacprop=1)
-trainer(epochs=50, jacprop=1)
 # trainer(epochs=500, jacprop=1)
 inspectdr()
-mutregplot(trainer, true_jacobian)
+mutregplot(trainer, vt, true_jacobian, title="Witout jacprop");gui()
+
+
+## With jacprop
+srand(1)
+models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
+opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 2)
+
+
+for i = 1:3
+    t = Trajectory(generate_data(sys, i)...)
+    trainer(t, epochs=1600, jacprop=1)
+end
+
+# trainer(epochs=500, jacprop=1)
+mutregplot(trainer, vt, true_jacobian, title="With jacprop");gui()
 ##
+
+
+
 ui = display_modeltrainer(trainer, size=(800,600))
 jacplot(trainer.models, trainer.trajs[3], true_jacobian, ds=20)
 @gif for i = 1:length(t)
@@ -88,7 +124,6 @@ end
 
 
 # TODO: Sample points all over state-space and use as validation
-# TODO: Move Trajectory to LTVModelsBase and implement predict(t::Trajectory) for KalmanModel
 # TODO: see if error during first two iterations, when number of trajs is small, is smaller using jacprop
 # TODO: make jacprop magnitude an option std()/10
-# TODO: Ensembles.jl
+# TODO: See if working better with different P ≢ 10

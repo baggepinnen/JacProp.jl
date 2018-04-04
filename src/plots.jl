@@ -1,6 +1,6 @@
 
 @recipe function plot_Trajectory(t::Trajectory; filtering=0, control=true)
-    layout --> control ? (2,1) : 1
+    layout --> (control ? (2,1) : 1)
     show --> false
     @series begin
         title --> "States"
@@ -45,7 +45,7 @@ end
                 e = log.(Complex.(e))./ħ
             end
             @series begin
-                c --> onlyat == 0 ? cmapt[i] : :red
+                c --> (onlyat == 0 ? cmapt[i] : :red)
                 real.(e), imag.(e)
             end
         end
@@ -59,7 +59,7 @@ end
         end
         lim = max(maximum(imag.(e)), lim)
         @series begin
-            c --> onlyat == 0 ? cmap[evalpoint] : :blue
+            c --> (onlyat == 0 ? cmap[evalpoint] : :blue)
             real.(e), imag.(e)
         end
         # scatter!(real.(e), imag.(e), c=:blue, show=false, subplot=2, legend=false)
