@@ -58,7 +58,7 @@ end
 num_params = 10
 wdecay     = 0
 stepsize   = 0.05
-sys        = TwoLinkSys(N=1000, h=0.02, σ0 = 0.1)
+sys        = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
 true_jacobian(x,u) = true_jacobian(sys,x,u)
 nu         = sys.nu
 nx         = sys.nx
@@ -77,7 +77,7 @@ end
 trainer(epochs=50, jacprop=1)
 trainer(epochs=50, jacprop=1)
 # trainer(epochs=500, jacprop=1)
-plotly()
+inspectdr()
 mutregplot(trainer, true_jacobian)
 ##
 ui = display_modeltrainer(trainer, size=(800,600))

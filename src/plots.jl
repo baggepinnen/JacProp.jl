@@ -93,7 +93,10 @@ function display_modeltrainer(mt::ModelTrainer; kwargs...)
                           ds      = slider(1:100, value=4, label="Downsampling"),
                           eigvals = [true,false],
                           cont    = [true,false],
-                          trajplot = togglebuttons(OrderedDict("Both"=>0,"Prediction"=>1,"Simulation"=>2))
+                          trajplot = togglebuttons(OrderedDict( "Prediction"=>1,
+                                                                "Simulation"=>2,
+                                                                "LTV"=>3),
+                                                                multiselect=true)
 
         ms        = mt.modelhistory[modelversion]
         modelinds = (mn <= 0 || mn > length(ms)) ? (1:length(ms)) : (mn:mn)
@@ -102,8 +105,9 @@ function display_modeltrainer(mt::ModelTrainer; kwargs...)
             eigvalplot(ms, mt.trajs[t]; ds=ds, cont=cont, kwargs...)
         else
             fig = plot(mt.trajs[t]; filtering=f, lab="True", kwargs...)
-            trajplot <= 1 && predplot!(ms,mt.trajs[t], l=:dash, subplot=1)
-            trajplot ∈ [0,2] && simplot!(ms,mt.trajs[t], l=:dash, subplot=1)
+            1 ∈ trajplot && predplot!(ms,mt.trajs[t], l=:dash, subplot=1)
+            2 ∈ trajplot && simplot!(ms,mt.trajs[t], l=:dash, subplot=1)
+            3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]), l=:dash, subplot=1)
             fig
         end
     end
