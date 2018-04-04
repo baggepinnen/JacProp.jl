@@ -82,14 +82,14 @@ vt = Trajectory(vx,vu,vy)
 ## Without jacprop
 srand(1)
 models     = [System(nx,nu,num_params, a) for a in default_activations]
-opts       = [[ADAM(params(models[i]), stepsize, decay=0.001); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 1, R2 = I)
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
 
 
 for i = 1:3
     t = Trajectory(generate_data(sys, i)...)
-    trainer(t, epochs=1500, jacprop=0)
+    trainer(t, epochs=2000, jacprop=0)
 end
 
 # trainer(epochs=500, jacprop=1)
@@ -102,36 +102,37 @@ mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout
 ## With jacprop and prior
 srand(1)
 models     = [System(nx,nu,num_params, a) for a in default_activations]
-opts       = [[ADAM(params(models[i]), stepsize, decay=0.001); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 1e1, R2 = 10I)
+trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
 
 
 for i = 1:3
     t = Trajectory(generate_data(sys, i)...)
-    trainerj(t, epochs=1500, jacprop=5, useprior=true)
+    trainerj(t, epochs=1000, jacprop=1, useprior=true)
 end
 # jacplot(trainerj.models, vt, true_jacobian)
 # jacplot!(KalmanModel(trainerj, vt), vt)
 # trainerj(epochs=500, jacprop=1)
-mutregplot!(trainerj, vt, true_jacobian, title="With jacprop", subplot=2, link=:both, useprior=false);gui()
+mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:both, useprior=false);gui()
 
 ## With jacprop no prior
 srand(1)
 models     = [System(nx,nu,num_params, a) for a in default_activations]
-opts       = [[ADAM(params(models[i]), stepsize, decay=0.001); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 1e1, R2 = 10I)
+trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
 
 
 for i = 1:3
     t = Trajectory(generate_data(sys, i)...)
-    trainerj(t, epochs=1500, jacprop=1, useprior=false)
+    trainerjn(t, epochs=1000, jacprop=1, useprior=false)
 end
-# jacplot(trainerj.models, vt, true_jacobian)
-# jacplot!(KalmanModel(trainerj, vt), vt)
-# trainerj(epochs=500, jacprop=1)
-mutregplot!(trainerj, vt, true_jacobian, title="With jacprop", subplot=3, link=:both, useprior=false);gui()
+# jacplot(trainerjn.models, vt, true_jacobian)
+# jacplot!(KalmanModel(trainerjn, vt), vt)
+# trainerjn(epochs=500, jacprop=1)
+mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:both, useprior=false);gui()
+plot!(ylims=(0,40))
 ##
 
 
