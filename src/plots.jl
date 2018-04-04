@@ -5,7 +5,7 @@
     @series begin
         title --> "States"
         xlabel --> "Time"
-        subplot --> 1
+        control && (subplot --> 1)
         filtering > 0 ? filt(ones(filtering),[filtering], t.x') : t.x'
     end
     control && @series begin
@@ -106,10 +106,10 @@ function display_modeltrainer(mt::ModelTrainer; kwargs...)
             eigvalplot(ms, mt.trajs[t]; ds=ds, cont=cont, kwargs...)
         else
             fig = plot(mt.trajs[t]; filtering=f, lab="True", kwargs...)
-            1 ∈ trajplot && predplot!(ms,mt.trajs[t], l=:dash, subplot=1)
-            2 ∈ trajplot && simplot!(ms,mt.trajs[t], l=:dash, subplot=1)
-            3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t], l=:dash, subplot=1)
-            4 ∈ trajplot && simplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t], l=:dash, subplot=1)
+            1 ∈ trajplot && predplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+            2 ∈ trajplot && simplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+            3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+            4 ∈ trajplot && simplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
             fig
         end
     end
@@ -157,6 +157,11 @@ end
     end
 end
 
+"""
+    jacplot(model(s), t [,truejac::(x,u)->J])
+"""
+jacplot
+
 @userplot JacPlot
 @recipe function jacplot(h::JacPlot; ds=10, cont=false)
     ms = h.args[1]
@@ -167,7 +172,12 @@ end
         Jtrue = map(x->truejacfun(x...), [(t.x[:,i],t.u[:,i]) for i=1:ds:size(t.x,2)])
     end
     show --> false
-    Jm,Js = jacobians(ms, t, ds)
+    conf = !(ms isa LTVModelsBase.AbstractModel)
+    if !conf
+        Jm = reshape(cat(2,ms.At, ms.Bt), :, length(ms))[:,1:ds:end]
+    else
+        Jm,Js = jacobians(ms, t, ds)
+    end
     N = size(Jm,1)
     layout --> N
     legend := false
@@ -179,7 +189,7 @@ end
             getindex.(Jtrue,i)
         end
         @series begin
-            ribbon --> 2Js[i,:]
+            conf && (ribbon --> 2Js[i,:])
             label --> "Estimated"
             fillalpha --> 0.5
             Jm[i,:]
@@ -193,7 +203,7 @@ end
 
 
 @userplot MutRegPlot
-@recipe function mutregplot(h::MutRegPlot)
+@recipe function mutregplot(h::MutRegPlot; useprior = true)
     @assert length(h.args) >= 2 "Call with (mt::ModelTrainer, t::Trajectory, true_jacobian::(x,u)->J)\n or (mt::ModelTrainer, true_jacobian::(x,u)->J"
     mt         = h.args[1]
     manytrajs  = length(h.args) == 2
@@ -207,7 +217,7 @@ end
 
     errorhistory = map(mt.modelhistory) do ms
         map(t) do t
-            ltvmodel = KalmanModel(mt, t, ms)
+            ltvmodel = KalmanModel(mt, t, ms, useprior=useprior)
             error_nn = 0.
             error_ltv = 0.
             for (i,xu) in enumerate(t)
@@ -231,6 +241,6 @@ end
         seriestype --> :scatter
     end
     c1,c2 = :red, :blue
-    @series (color := c1;label := "NN"; ((1:N) .- 0.1, getindex.(errorhistory,1)))
-    @series (color := c2;label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
+    @series (color --> c1;label := "NN"; ((1:N) .- 0.1, getindex.(errorhistory,1)))
+    @series (color --> c2;label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
 end

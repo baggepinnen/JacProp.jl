@@ -1,5 +1,3 @@
-import StatsBase.predict
-
 export AbstractSys, AbstractSystem, AbstractDiffSystem, AbstractVelSystem
 export System, DiffSystem, VelSystem
 export simulate, predict, jacobians
@@ -8,6 +6,8 @@ abstract type AbstractSys <: LTVModelsBase.AbstractModel end
 abstract type AbstractSystem <: AbstractSys end
 abstract type AbstractDiffSystem <: AbstractSys end
 abstract type AbstractVelSystem <: AbstractSys end
+
+import LTVModelsBase: simulate, predict
 
 @with_kw struct System{T} <: AbstractSystem
     m::T
@@ -94,13 +94,13 @@ end
 
 simulate(ms, t::Trajectory; kwargs...) = simulate(ms, t.xu; kwargs...)
 
-function StatsBase.predict(ms::AbstractEnsembleSystem, x::AbstractMatrix, testmode=true)
+function predict(ms::AbstractEnsembleSystem, x::AbstractMatrix, testmode=true)
     Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
     mean(y).data, getfield.(extrema(y), :data)
 end
 
-function StatsBase.predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
+function predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
     yh = mean(y).data
@@ -110,7 +110,7 @@ function StatsBase.predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=tru
     yh, bounds
 end
 
-StatsBase.predict(ms, t::Trajectory; kwargs...) = StatsBase.predict(ms, t.xu; kwargs...)
+predict(ms, t::Trajectory; kwargs...) = predict(ms, t.xu; kwargs...)
 
 function Flux.jacobian(ms::AbstractEnsembleSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)

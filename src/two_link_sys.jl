@@ -58,7 +58,7 @@ end
 num_params = 10
 wdecay     = 0
 stepsize   = 0.05
-sys        = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
+const sys  = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
 true_jacobian(x,u) = true_jacobian(sys,x,u)
 nu         = sys.nu
 nx         = sys.nx
@@ -81,39 +81,65 @@ vt = Trajectory(vx,vu,vy)
 
 ## Without jacprop
 srand(1)
-models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+models     = [System(nx,nu,num_params, a) for a in default_activations]
+opts       = [[ADAM(params(models[i]), stepsize, decay=0.001); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 2, R2 = I)
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 1, R2 = I)
 
 
 for i = 1:3
     t = Trajectory(generate_data(sys, i)...)
-    trainer(t, epochs=1000, jacprop=0)
+    trainer(t, epochs=1500, jacprop=0)
 end
 
 # trainer(epochs=500, jacprop=1)
-inspectdr()
-mutregplot(trainer, vt, true_jacobian, title="Witout jacprop");gui()
+# inspectdr()
+# jacplot(trainer.models, vt, true_jacobian)
+# jacplot!(KalmanModel(trainer, vt), vt)
+mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(1,3));gui()
 
 
-## With jacprop
+## With jacprop and prior
 srand(1)
-models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+models     = [System(nx,nu,num_params, a) for a in default_activations]
+opts       = [[ADAM(params(models[i]), stepsize, decay=0.001); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 2, R2 = I)
+trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 1e1, R2 = 10I)
 
 
 for i = 1:3
     t = Trajectory(generate_data(sys, i)...)
-    trainer(t, epochs=1000, jacprop=1)
+    trainerj(t, epochs=1500, jacprop=5, useprior=true)
 end
+# jacplot(trainerj.models, vt, true_jacobian)
+# jacplot!(KalmanModel(trainerj, vt), vt)
+# trainerj(epochs=500, jacprop=1)
+mutregplot!(trainerj, vt, true_jacobian, title="With jacprop", subplot=2, link=:both, useprior=false);gui()
 
-# trainer(epochs=500, jacprop=1)
-mutregplot(trainer, vt, true_jacobian, title="With jacprop");gui()
+## With jacprop no prior
+srand(1)
+models     = [System(nx,nu,num_params, a) for a in default_activations]
+opts       = [[ADAM(params(models[i]), stepsize, decay=0.001); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+
+trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 1e1, R2 = 10I)
+
+
+for i = 1:3
+    t = Trajectory(generate_data(sys, i)...)
+    trainerj(t, epochs=1500, jacprop=1, useprior=false)
+end
+# jacplot(trainerj.models, vt, true_jacobian)
+# jacplot!(KalmanModel(trainerj, vt), vt)
+# trainerj(epochs=500, jacprop=1)
+mutregplot!(trainerj, vt, true_jacobian, title="With jacprop", subplot=3, link=:both, useprior=false);gui()
 ##
 
+
+jacplot(trainer.models, vt, true_jacobian, label="Without", c=:red, reuse=false)
+jacplot!(KalmanModel(trainer, vt), vt, label="Without", c=:pink)
+jacplot!(trainerj.models, vt, true_jacobian, label="With", c=:blue)
+jacplot!(KalmanModel(trainerj, vt), vt, label="With", c=:cyan)
+gui()
 
 
 ui = display_modeltrainer(trainer, size=(800,600))
@@ -127,3 +153,4 @@ end
 # TODO: see if error during first two iterations, when number of trajs is small, is smaller using jacprop
 # TODO: make jacprop magnitude an option std()/10
 # TODO: See if working better with different P ≢ 10
+# TODO: there is defenetely something wrong in fitting with prior

@@ -2,7 +2,7 @@ module JacProp
 
 export Trajectory, default_activations, ModelTrainer, sample_jacprop, push!, train!, display_modeltrainer
 
-using LTVModelsBase, Parameters, ForwardDiff, StatsBase, Reexport, Lazy, Juno, FunctionEnsembles
+using LTVModelsBase, Parameters, ForwardDiff, Reexport, Lazy, Juno, FunctionEnsembles
 @reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils
 using Flux: back!, truncate!, treelike, train!, mse, testmode!, params, jacobian, throttle
 using Flux.Optimise: Param, optimiser, RMSProp, expdecay
@@ -51,11 +51,11 @@ train!(mt::ModelTrainer; epochs=1, jacprop=1)
 
 See also [`ModelTrainer`](@ref)
 """
-function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1)
+function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1, useprior=true)
     @assert !isempty(mt.trajs) "No data in ModelTrainer"
     @unpack models,opts,losses,trajs = mt
     data1 = todata(mt)
-    ltvmodels = fit_models(mt)
+    ltvmodels = fit_models(mt, useprior)
     Flux.@epochs epochs begin
         data2 = [todata(sample_jacprop(mt, ltvmodels)) for i = 1:jacprop]
         data = chain(data1, data2...)
@@ -66,12 +66,12 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1)
     push!(mt.modelhistory, deepcopy(models))
 end
 
-function fit_models(mt::ModelTrainer)
+function fit_models(mt::ModelTrainer, useprior=true)
     modeltype = typeof(mt.models[1])
     @unpack R1,R2,P0 = mt
     map(mt.trajs) do traj
         @unpack x,u,nx,nu = traj
-        ltvmodel = KalmanModel(mt, traj)
+        ltvmodel = KalmanModel(mt, traj, useprior=useprior)
     end
 end
 
@@ -99,9 +99,9 @@ function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models;
         fx       = cat(3,[reshape(Jm[1:nx^2,i], nx,nx) for i=1:T]...)
         fu       = cat(3,[reshape(Jm[nx^2+1:end,i], nx,nu) for i=1:T]...)
         prior    = KalmanModel(fx,fu,Pt,false)
-        ltvmodel = KalmanModel(model, prior, x,u,R1,R2,P0, extend = true)
+        ltvmodel = KalmanModel(model, prior, x,u,R1,R2,P0, extend = true, printfit=false)
     else # Don't use prior if it's the first time training
-        ltvmodel = KalmanModel(x,u,R1,R2,P0, extend = true)
+        ltvmodel = KalmanModel(x,u,R1,R2,P0, extend = true, printfit=false)
     end
 end
 
