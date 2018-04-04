@@ -55,7 +55,7 @@ end
 
 
 
-num_params = 20
+num_params = 10
 wdecay     = 0
 stepsize   = 0.05
 sys        = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
@@ -66,7 +66,7 @@ nx         = sys.nx
 ## Generate validation data
 function valdata()
     vx,vu,vy = Vector{Float64}[],Vector{Float64}[],Vector{Float64}[]
-    for i = 20:100
+    for i = 20:80
         x,u = generate_data(sys,i, true)
         for j in 1:100:(sys.N-1)
             push!(vx, x[:,j])
@@ -84,12 +84,12 @@ srand(1)
 models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 2)
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 2, R2 = I)
 
 
 for i = 1:3
     t = Trajectory(generate_data(sys, i)...)
-    trainer(t, epochs=1600, jacprop=0)
+    trainer(t, epochs=1000, jacprop=0)
 end
 
 # trainer(epochs=500, jacprop=1)
@@ -102,12 +102,12 @@ srand(1)
 models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 2)
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 2, R2 = I)
 
 
 for i = 1:3
     t = Trajectory(generate_data(sys, i)...)
-    trainer(t, epochs=1600, jacprop=1)
+    trainer(t, epochs=1000, jacprop=1)
 end
 
 # trainer(epochs=500, jacprop=1)

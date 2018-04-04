@@ -95,7 +95,8 @@ function display_modeltrainer(mt::ModelTrainer; kwargs...)
                           cont    = [true,false],
                           trajplot = togglebuttons(OrderedDict( "Prediction"=>1,
                                                                 "Simulation"=>2,
-                                                                "LTV"=>3),
+                                                                "LTV pred"=>3,
+                                                                "LTV sim"=>4),
                                                                 multiselect=true)
 
         ms        = mt.modelhistory[modelversion]
@@ -107,7 +108,8 @@ function display_modeltrainer(mt::ModelTrainer; kwargs...)
             fig = plot(mt.trajs[t]; filtering=f, lab="True", kwargs...)
             1 ∈ trajplot && predplot!(ms,mt.trajs[t], l=:dash, subplot=1)
             2 ∈ trajplot && simplot!(ms,mt.trajs[t], l=:dash, subplot=1)
-            3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]), l=:dash, subplot=1)
+            3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t], l=:dash, subplot=1)
+            4 ∈ trajplot && simplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t], l=:dash, subplot=1)
             fig
         end
     end
@@ -119,7 +121,11 @@ end
     ms = h.args[1]
     t = h.args[2]
     lab --> "Prediction"
-    filt(ones(filtering),[filtering], predict(ms,t)[1]')
+    if ms isa Vector
+        filt(ones(filtering),[filtering], predict(ms,t)[1]')
+    else
+        filt(ones(filtering),[filtering], LTVModelsBase.predict(ms,t)')
+    end
 end
 
 @userplot SimPlot
@@ -127,7 +133,8 @@ end
     ms = h.args[1]
     t = h.args[2]
     lab --> "Simulation"
-    filt(ones(filtering),[filtering], simulate(ms,t)')
+    simfun = ms isa LTVModelsBase.AbstractModel ? LTVModelsBase.simulate : simulate
+    filt(ones(filtering),[filtering], simfun(ms,t)')
 end
 
 @userplot PredSimPlot
