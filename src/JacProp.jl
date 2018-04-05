@@ -2,7 +2,7 @@ module JacProp
 
 export Trajectory, default_activations, ModelTrainer, sample_jacprop, push!, train!, display_modeltrainer
 
-using LTVModelsBase, Parameters, ForwardDiff, Reexport, Lazy, Juno, FunctionEnsembles
+using LTVModelsBase, Parameters, Reexport, Lazy, Juno, FunctionEnsembles
 @reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils
 using Flux: back!, truncate!, treelike, train!, mse, testmode!, params, jacobian, throttle
 using Flux.Optimise: Param, optimiser, RMSProp, expdecay
@@ -32,10 +32,10 @@ See also [`LTVModels`](@ref),  [`LTVModels.KalmanModel`](@ref)
     models
     opts
     losses
-    R1 = I
-    R2 = 10_000I
-    P0 = 10_000I
-    P  = 10_000
+    R1         = I
+    R2         = 10_000I
+    P0         = 10_000I
+    P::Float64 = 1.0
     trajs::Vector{Trajectory} = Trajectory[]
     cb::cbT
     modelhistory = []
@@ -56,7 +56,7 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1, useprior=true)
     @unpack models,opts,losses,trajs = mt
     data1 = todata(mt)
     ltvmodels = fit_models(mt, useprior)
-    Flux.@epochs epochs begin
+    @progress for epoch = 1:epochs
         data2 = [todata(sample_jacprop(mt, ltvmodels)) for i = 1:jacprop]
         data = chain(data1, data2...)
         for (loss, opt) in zip(losses,opts)
@@ -66,19 +66,14 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1, useprior=true)
     push!(mt.modelhistory, deepcopy(models))
 end
 
-function fit_models(mt::ModelTrainer, useprior=true)
-    modeltype = typeof(mt.models[1])
-    @unpack R1,R2,P0 = mt
+function fit_models(mt::ModelTrainer, useprior)
     map(mt.trajs) do traj
-        @unpack x,u,nx,nu = traj
         ltvmodel = KalmanModel(mt, traj, useprior=useprior)
     end
 end
 
-function sample_jacprop(mt::ModelTrainer, models)
-    modeltype = typeof(mt.models[1])
-    @unpack R1,R2,P0 = mt
-    perturbed_trajs = map(mt.trajs, models) do traj, ltvmodel
+function sample_jacprop(mt::ModelTrainer, ltvmodels)
+    perturbed_trajs = map(mt.trajs, ltvmodels) do traj, ltvmodel
         @unpack x,u,nx,nu = traj
         xa = x .+ std(x,2)/10 .* randn(size(x))
         ua = u .+ std(u,2)/10 .* randn(size(u))
@@ -89,6 +84,7 @@ end
 
 function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models;
     P=mt.P, useprior=!isempty(mt.modelhistory))
+    useprior = useprior && !isempty(mt.modelhistory)
     @unpack x,u,nx,nu = t
     @unpack R1,R2,P0  = mt
     T                 = length(t)
@@ -102,7 +98,9 @@ function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models;
         ltvmodel = KalmanModel(model, prior, x,u,R1,R2,P0, extend = true, printfit=false)
     else # Don't use prior if it's the first time training
         ltvmodel = KalmanModel(x,u,R1,R2,P0, extend = true, printfit=false)
+        Jm, Js = jacobians(ms, t) # TODO: remove when it does not fuck up
     end
+    ltvmodel
 end
 
 todata(trajs::Vector{Trajectory}) = [(traj.xu,traj.y) for traj in trajs]
@@ -111,7 +109,7 @@ todata(mt::ModelTrainer) = todata(mt.trajs)
 Base.push!(mt::ModelTrainer, t::Trajectory) = push!(mt.trajs, t)
 Base.push!(mt::ModelTrainer, data::Matrix...) = push!(mt.trajs, Trajectory(data...))
 
-(mt::ModelTrainer)(; epochs=1, jacprop=1, kwargs...) = train!(mt; epochs=epochs, jacprop=jacprop, kwargs...)
+(mt::ModelTrainer)(; kwargs...) = train!(mt; kwargs...)
 
 function (mt::ModelTrainer)(t::Trajectory; kwargs...)
     push!(mt,t)

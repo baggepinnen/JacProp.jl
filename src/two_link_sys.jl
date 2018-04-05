@@ -1,6 +1,7 @@
 if length(workers()) == 1
     addprocs(4)
 end
+@everywhere using Revise
 using ParallelDataTransfer
 @everywhere include(Pkg.dir("DynamicMovementPrimitives","src","two_link.jl"))
 @everywhere using TwoLink, Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
@@ -21,7 +22,6 @@ using ParallelDataTransfer
     function generate_data(sys::TwoLinkSys, seed, validation=false; ufun=u->filt(ones(50),[50], 10u')')
         @unpack N, nu, nx, h, σ0, sind, uind, s1ind = sys
         srand(seed)
-
         done = false
         local x,u
         while !done
@@ -33,12 +33,10 @@ using ParallelDataTransfer
             x = hcat(sol(t)...)
             done = all(abs.(x[1:2,:]) .< 0.9π)
         end
-        # y = hcat([time_derivative(x[:,t], u[:,t])[3:4] for t in 1:N]...)
         u = u[:,1:N]
         validation || (x .+= σ0 * randn(size(x)))
         @assert all(isfinite, x)
         @assert all(isfinite, u)
-
         x,u
     end
 
@@ -49,11 +47,11 @@ using ParallelDataTransfer
     end
 
     function callbacker(loss,d)
-        # i = 0
-        # function ()
-        #     i % 100 == 0 && println(@sprintf("Loss: %.4f", sum(d->Flux.data(loss(d...)),d)))
-        #     i += 1
-        # end
+        i = 0
+        function ()
+            # i % 100 == 0 && println(@sprintf("Loss: %.4f", sum(d->Flux.data(loss(d...)),d)))
+            # i += 1
+        end
     end
 
     num_params = 10
@@ -90,9 +88,9 @@ sendto(collect(2:5), trajs=trajs, vt=vt)
 ## Without jacprop
 f2 = @spawnat 2 begin
     srand(1)
-    models     = [System(nx,nu,num_params, a) for a in default_activations]
+    models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
+    trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5e10, R2 = 100I)
     for i = 1:3
         trainer(trajs[i], epochs=2000, jacprop=0)
     end
@@ -103,9 +101,9 @@ end
 ## With jacprop and prior
 f3 = @spawnat 3 begin
     srand(1)
-    models     = [System(nx,nu,num_params, a) for a in default_activations]
+    models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 50, R2 = 100I)
+    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5e10, R2 = 100I)
     for i = 1:3
         trainerj(trajs[i], epochs=1000, jacprop=1, useprior=true)
     end
@@ -115,30 +113,31 @@ end
 ## With jacprop no prior
 f4 = @spawnat 4 begin
     srand(1)
-    models     = [System(nx,nu,num_params, a) for a in default_activations]
+    models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, R2 = 100I)
+    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 1, R2 = 100I)
     for i = 1:3
         trainerjn(trajs[i], epochs=1000, jacprop=1, useprior=false)
     end
     trainerjn
 end
 
+pyplot()
 trainer,trainerj,trainerjn = fetch(f2), fetch(f3),fetch(f4)
 
 mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(1,3))
-mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:both, useprior=false)
+mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:both, useprior=true)
 mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:both, useprior=false)
-plot!(ylims=(0,Inf));gui()
+gui()
 ##
 
 
 jacplot(trainer.models, vt, true_jacobian, label="Without", c=:red, reuse=false, fillalpha=0.2)
-jacplot!(KalmanModel(trainer, vt), vt, label="Without", c=:pink)
+# jacplot!(KalmanModel(trainer, vt), vt, label="Without", c=:pink)
 jacplot!(trainerj.models, vt, label="With", c=:blue, fillalpha=0.2)
-jacplot!(KalmanModel(trainerj, vt), vt, label="With", c=:cyan)
+# jacplot!(KalmanModel(trainerj, vt), vt, label="With", c=:cyan)
 jacplot!(trainerjn.models, vt, label="With no", c=:green, fillalpha=0.2)
-jacplot!(KalmanModel(trainerjn, vt), vt, label="With no", c=:green)
+# jacplot!(KalmanModel(trainerjn, vt), vt, label="With no", c=:green)
 gui()
 
 
