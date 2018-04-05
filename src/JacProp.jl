@@ -98,7 +98,6 @@ function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models;
         ltvmodel = KalmanModel(model, prior, x,u,R1,R2,P0, extend = true, printfit=false)
     else # Don't use prior if it's the first time training
         ltvmodel = KalmanModel(x,u,R1,R2,P0, extend = true, printfit=false)
-        Jm, Js = jacobians(ms, t) # TODO: remove when it does not fuck up
     end
     ltvmodel
 end

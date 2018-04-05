@@ -114,10 +114,10 @@ predict(ms, t::Trajectory; kwargs...) = predict(ms, t.xu; kwargs...)
 
 function Flux.jacobian(ms::AbstractEnsembleSystem, x::AbstractArray, testmode=true)
     # Flux.testmode!.(ms, testmode)
-    @show Flux.Tracker.grad(params.(ms[1]))
-    Flux.Tracker.zero_grad!.(params.(ms))
+    # @show Flux.Tracker.grad(params.(ms[1]))
+    # Flux.Tracker.zero_grad!.(params.(ms))
     jacs = [Flux.jacobian(m,x) for m in ms]
-    Flux.Tracker.zero_grad!.(params.(ms))
+    # Flux.Tracker.zero_grad!.(params.(ms))
     jacmat = smartcat3(jacs)
     squeeze(mean(jacmat, 3), 3), squeeze(std(jacmat, 3), 3)
 end
@@ -139,10 +139,11 @@ models(results::Associative) = [r[:m]]
 
 
 function jacobians(ms, t, ds=1)
+    msc = deepcopy(ms) # Obs, this is to not fuck up the gradients of the model parameters ??
     xu = t.xu
     N = size(xu,2)
     J = map(1:ds:N) do evalpoint
-        Jm, Js = jacobian(ms, xu[:,evalpoint])
+        Jm, Js = jacobian(msc, xu[:,evalpoint])
         Jm[:], Js[:]
     end
     Jm = smartcat2(getindex.(J,1))

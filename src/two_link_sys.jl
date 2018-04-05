@@ -92,7 +92,7 @@ f2 = @spawnat 2 begin
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
     trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5e10, R2 = 100I)
     for i = 1:3
-        trainer(trajs[i], epochs=2000, jacprop=0)
+        trainer(trajs[i], epochs=2000, jacprop=0, useprior=false)
     end
     trainer
 end
