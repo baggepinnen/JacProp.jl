@@ -49,11 +49,11 @@ using ParallelDataTransfer
     end
 
     function callbacker(loss,d)
-        i = 0
-        function ()
-            i % 100 == 0 && println(@sprintf("Loss: %.4f", sum(d->Flux.data(loss(d...)),d)))
-            i += 1
-        end
+        # i = 0
+        # function ()
+        #     i % 100 == 0 && println(@sprintf("Loss: %.4f", sum(d->Flux.data(loss(d...)),d)))
+        #     i += 1
+        # end
     end
 
     num_params = 10
@@ -105,7 +105,7 @@ f3 = @spawnat 3 begin
     srand(1)
     models     = [System(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
+    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 50, R2 = 100I)
     for i = 1:3
         trainerj(trajs[i], epochs=1000, jacprop=1, useprior=true)
     end
@@ -117,7 +117,7 @@ f4 = @spawnat 4 begin
     srand(1)
     models     = [System(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
+    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, R2 = 100I)
     for i = 1:3
         trainerjn(trajs[i], epochs=1000, jacprop=1, useprior=false)
     end
