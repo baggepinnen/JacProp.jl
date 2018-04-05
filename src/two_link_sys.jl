@@ -1,67 +1,71 @@
-include(Pkg.dir("DynamicMovementPrimitives","src","two_link.jl"))
-
-using TwoLink, Parameters, JacProp, OrdinaryDiffEq
-using Flux: params, jacobian
-using Flux.Optimise: Param, optimiser, expdecay
-
-@with_kw struct TwoLinkSys
-    N  = 1000
-    nu  = 2
-    nx = 4
-    h = 0.02
-    σ0 = 0
-    sind = 1:nx
-    uind = nx+1:(nx+nu)
-    s1ind = (nx+nu+1):(nx+nu+nx)
+if length(workers()) == 1
+    addprocs(4)
 end
-
-function generate_data(sys::TwoLinkSys, seed, validation=false; ufun=u->filt(ones(50),[50], 10u')')
-    @unpack N, nu, nx, h, σ0, sind, uind, s1ind = sys
-    srand(seed)
-
-    done = false
-    local x,u
-    while !done
-        u = ufun(randn(nu,N+2))
-        t  = 0:h:N*h
-        x0 = [-0.4,0,0,0]
-        prob = OrdinaryDiffEq.ODEProblem((x,p,t)->time_derivative(x, u[:,floor(Int,t/h)+1]),x0,(t[[1,end]]...))
-        sol = solve(prob,Tsit5(),reltol=1e-8,abstol=1e-8)
-        x = hcat(sol(t)...)
-        done = all(abs.(x[1:2,:]) .< 0.9π)
+using ParallelDataTransfer
+@everywhere include(Pkg.dir("DynamicMovementPrimitives","src","two_link.jl"))
+@everywhere using TwoLink, Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
+@everywhere using Flux: params, jacobian
+@everywhere using Flux.Optimise: Param, optimiser, expdecay
+@everywhere begin
+    @with_kw struct TwoLinkSys
+        N  = 1000
+        nu  = 2
+        nx = 4
+        h = 0.02
+        σ0 = 0
+        sind = 1:nx
+        uind = nx+1:(nx+nu)
+        s1ind = (nx+nu+1):(nx+nu+nx)
     end
-    # y = hcat([time_derivative(x[:,t], u[:,t])[3:4] for t in 1:N]...)
-    u = u[:,1:N]
-    validation || (x .+= σ0 * randn(size(x)))
-    @assert all(isfinite, x)
-    @assert all(isfinite, u)
 
-    x,u
-end
+    function generate_data(sys::TwoLinkSys, seed, validation=false; ufun=u->filt(ones(50),[50], 10u')')
+        @unpack N, nu, nx, h, σ0, sind, uind, s1ind = sys
+        srand(seed)
 
-function true_jacobian(sys::TwoLinkSys, x::AbstractVector, u::AbstractVector)
-    Jtrue = ReverseDiff.jacobian(x->time_derivative(x, u), x)[:,1:4]
-    Jtrue = [Jtrue ReverseDiff.jacobian(u->time_derivative(x, u), u)]
-    Jtrue = expm([sys.h*Jtrue;zeros(2,6)])[1:4,:] # Discretize
-end
+        done = false
+        local x,u
+        while !done
+            u = ufun(randn(nu,N+2))
+            t  = 0:h:N*h
+            x0 = [-0.4,0,0,0]
+            prob = OrdinaryDiffEq.ODEProblem((x,p,t)->time_derivative(x, u[:,floor(Int,t/h)+1]),x0,(t[[1,end]]...))
+            sol = solve(prob,Tsit5(),reltol=1e-8,abstol=1e-8)
+            x = hcat(sol(t)...)
+            done = all(abs.(x[1:2,:]) .< 0.9π)
+        end
+        # y = hcat([time_derivative(x[:,t], u[:,t])[3:4] for t in 1:N]...)
+        u = u[:,1:N]
+        validation || (x .+= σ0 * randn(size(x)))
+        @assert all(isfinite, x)
+        @assert all(isfinite, u)
 
-function callbacker(loss,d)
-    i = 0
-    function ()
-        i % 100 == 0 && println(@sprintf("Loss: %.4f", sum(d->Flux.data(loss(d...)),d)))
-        i += 1
+        x,u
     end
+
+    function true_jacobian(sys::TwoLinkSys, x::AbstractVector, u::AbstractVector)
+        Jtrue = ReverseDiff.jacobian(x->time_derivative(x, u), x)[:,1:4]
+        Jtrue = [Jtrue ReverseDiff.jacobian(u->time_derivative(x, u), u)]
+        Jtrue = expm([sys.h*Jtrue;zeros(2,6)])[1:4,:] # Discretize
+    end
+
+    function callbacker(loss,d)
+        i = 0
+        function ()
+            i % 100 == 0 && println(@sprintf("Loss: %.4f", sum(d->Flux.data(loss(d...)),d)))
+            i += 1
+        end
+    end
+
+    num_params = 10
+    wdecay     = 0
+    stepsize   = 0.05
+    const sys  = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
+    true_jacobian(x,u) = true_jacobian(sys,x,u)
+    nu         = sys.nu
+    nx         = sys.nx
+
 end
 
-
-
-num_params = 10
-wdecay     = 0
-stepsize   = 0.05
-const sys  = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
-true_jacobian(x,u) = true_jacobian(sys,x,u)
-nu         = sys.nu
-nx         = sys.nx
 
 ## Generate validation data
 function valdata()
@@ -79,60 +83,70 @@ end
 vx,vu,vy = valdata()
 vt = Trajectory(vx,vu,vy)
 
+trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
+
+sendto(collect(2:5), trajs=trajs, vt=vt)
+
 ## Without jacprop
-srand(1)
-models     = [System(nx,nu,num_params, a) for a in default_activations]
-opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+f2 = @spawnat 2 begin
+    srand(1)
+    models     = [System(nx,nu,num_params, a) for a in default_activations]
+    opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
+    trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
 
+    for i = 1:3
+        trainer(trajs[i], epochs=2000, jacprop=0)
+    end
 
-for i = 1:3
-    t = Trajectory(generate_data(sys, i)...)
-    trainer(t, epochs=2000, jacprop=0)
+    # trainer(epochs=500, jacprop=1)
+    # inspectdr()
+    # jacplot(trainer.models, vt, true_jacobian)
+    # jacplot!(KalmanModel(trainer, vt), vt)
+    trainer
 end
-
-# trainer(epochs=500, jacprop=1)
-# inspectdr()
-# jacplot(trainer.models, vt, true_jacobian)
-# jacplot!(KalmanModel(trainer, vt), vt)
-mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(1,3));gui()
 
 
 ## With jacprop and prior
-srand(1)
-models     = [System(nx,nu,num_params, a) for a in default_activations]
-opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+f3 = @spawnat 3 begin
+    srand(1)
+    models     = [System(nx,nu,num_params, a) for a in default_activations]
+    opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
+    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
 
 
-for i = 1:3
-    t = Trajectory(generate_data(sys, i)...)
-    trainerj(t, epochs=1000, jacprop=1, useprior=true)
+    for i = 1:3
+        trainerj(trajs[i], epochs=1000, jacprop=1, useprior=true)
+    end
+    # jacplot(trainerj.models, vt, true_jacobian)
+    # jacplot!(KalmanModel(trainerj, vt), vt)
+    # trainerj(epochs=500, jacprop=1)
+    trainerj
 end
-# jacplot(trainerj.models, vt, true_jacobian)
-# jacplot!(KalmanModel(trainerj, vt), vt)
-# trainerj(epochs=500, jacprop=1)
-mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:both, useprior=false);gui()
 
 ## With jacprop no prior
-srand(1)
-models     = [System(nx,nu,num_params, a) for a in default_activations]
-opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+f4 = @spawnat 4 begin
+    srand(1)
+    models     = [System(nx,nu,num_params, a) for a in default_activations]
+    opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 
-trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
+    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
 
-
-for i = 1:3
-    t = Trajectory(generate_data(sys, i)...)
-    trainerjn(t, epochs=1000, jacprop=1, useprior=false)
+    for i = 1:3
+        trainerjn(trajs[i], epochs=1000, jacprop=1, useprior=false)
+    end
+    # jacplot(trainerjn.models, vt, true_jacobian)
+    # jacplot!(KalmanModel(trainerjn, vt), vt)
+    # trainerjn(epochs=500, jacprop=1)
+    trainerjn
 end
-# jacplot(trainerjn.models, vt, true_jacobian)
-# jacplot!(KalmanModel(trainerjn, vt), vt)
-# trainerjn(epochs=500, jacprop=1)
-mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:both, useprior=false);gui()
-plot!(ylims=(0,40))
+
+trainer,trainerj,trainerjn = fetch(f2), fetch(f3),fetch(f4)
+mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(1,3))
+mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:both, useprior=false)
+mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:both, useprior=false)
+plot!(ylims=(0,40));gui()
 ##
 
 
