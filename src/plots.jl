@@ -170,6 +170,7 @@ jacplot
     if truejac
         truejacfun = h.args[3]
         Jtrue = map(x->truejacfun(x...), [(t.x[:,i],t.u[:,i]) for i=1:ds:size(t.x,2)])
+        @show Jtrue[1] - Jtrue[end]
     end
     show --> false
     conf = !(ms isa LTVModelsBase.AbstractModel)
@@ -191,7 +192,7 @@ jacplot
         @series begin
             conf && (ribbon --> 2Js[i,:])
             label --> "Estimated"
-            fillalpha --> 0.5
+            fillalpha --> 0.4
             Jm[i,:]
         end
         @series [0 0]
@@ -227,7 +228,7 @@ end
                 error_nn += eval_jac(Jm, Jtrue)
                 error_ltv += eval_jac([ltvmodel.At[:,:,i] ltvmodel.Bt[:,:,i]], Jtrue)
             end
-            error_nn, error_ltv
+            error_nn/length(t), error_ltv/length(t)
         end
     end
     title --> "Jacobian error"

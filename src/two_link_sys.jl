@@ -72,7 +72,7 @@ function valdata()
     vx,vu,vy = Vector{Float64}[],Vector{Float64}[],Vector{Float64}[]
     for i = 20:80
         x,u = generate_data(sys,i, true)
-        for j in 1:100:(sys.N-1)
+        for j in 10:5:(sys.N-1)
             push!(vx, x[:,j])
             push!(vy, x[:,j+1])
             push!(vu, u[:,j])
@@ -92,17 +92,10 @@ f2 = @spawnat 2 begin
     srand(1)
     models     = [System(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-
     trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
-
     for i = 1:3
         trainer(trajs[i], epochs=2000, jacprop=0)
     end
-
-    # trainer(epochs=500, jacprop=1)
-    # inspectdr()
-    # jacplot(trainer.models, vt, true_jacobian)
-    # jacplot!(KalmanModel(trainer, vt), vt)
     trainer
 end
 
@@ -112,16 +105,10 @@ f3 = @spawnat 3 begin
     srand(1)
     models     = [System(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-
     trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
-
-
     for i = 1:3
         trainerj(trajs[i], epochs=1000, jacprop=1, useprior=true)
     end
-    # jacplot(trainerj.models, vt, true_jacobian)
-    # jacplot!(KalmanModel(trainerj, vt), vt)
-    # trainerj(epochs=500, jacprop=1)
     trainerj
 end
 
@@ -130,30 +117,28 @@ f4 = @spawnat 4 begin
     srand(1)
     models     = [System(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-
     trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5, R2 = 100I)
-
     for i = 1:3
         trainerjn(trajs[i], epochs=1000, jacprop=1, useprior=false)
     end
-    # jacplot(trainerjn.models, vt, true_jacobian)
-    # jacplot!(KalmanModel(trainerjn, vt), vt)
-    # trainerjn(epochs=500, jacprop=1)
     trainerjn
 end
 
 trainer,trainerj,trainerjn = fetch(f2), fetch(f3),fetch(f4)
+
 mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(1,3))
 mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:both, useprior=false)
 mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:both, useprior=false)
-plot!(ylims=(0,40));gui()
+plot!(ylims=(0,Inf));gui()
 ##
 
 
-jacplot(trainer.models, vt, true_jacobian, label="Without", c=:red, reuse=false)
+jacplot(trainer.models, vt, true_jacobian, label="Without", c=:red, reuse=false, fillalpha=0.2)
 jacplot!(KalmanModel(trainer, vt), vt, label="Without", c=:pink)
-jacplot!(trainerj.models, vt, true_jacobian, label="With", c=:blue)
+jacplot!(trainerj.models, vt, label="With", c=:blue, fillalpha=0.2)
 jacplot!(KalmanModel(trainerj, vt), vt, label="With", c=:cyan)
+jacplot!(trainerjn.models, vt, label="With no", c=:green, fillalpha=0.2)
+jacplot!(KalmanModel(trainerjn, vt), vt, label="With no", c=:green)
 gui()
 
 
