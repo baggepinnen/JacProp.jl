@@ -245,3 +245,17 @@ end
     @series (color --> c1;label := "NN"; ((1:N) .- 0.1, getindex.(errorhistory,1)))
     @series (color --> c2;label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
 end
+
+
+
+
+
+@userplot TracePlot
+@recipe function traceplot(h::TracePlot)
+    trace         = h.args[1]
+    if !(trace isa ValueHistory)
+        trace = trace.trace
+    end
+    yscale --> :log10
+    trace
+end

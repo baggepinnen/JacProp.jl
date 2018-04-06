@@ -25,12 +25,12 @@ using ParallelDataTransfer
         done = false
         local x,u
         while !done
-            u = ufun(randn(nu,N+2))
-            t  = 0:h:N*h
-            x0 = [-0.4,0,0,0]
+            u    = ufun(randn(nu,N+2))
+            t    = 0:h:N*h
+            x0   = [-0.4,0,0,0]
             prob = OrdinaryDiffEq.ODEProblem((x,p,t)->time_derivative(x, u[:,floor(Int,t/h)+1]),x0,(t[[1,end]]...))
-            sol = solve(prob,Tsit5(),reltol=1e-8,abstol=1e-8)
-            x = hcat(sol(t)...)
+            sol  = solve(prob,Tsit5(),reltol=1e-8,abstol=1e-8)
+            x    = hcat(sol(t)...)
             done = all(abs.(x[1:2,:]) .< 0.9π)
         end
         u = u[:,1:N]
@@ -46,11 +46,12 @@ using ParallelDataTransfer
         Jtrue = expm([sys.h*Jtrue;zeros(2,6)])[1:4,:] # Discretize
     end
 
-    function callbacker(loss,d)
-        i = 0
+    function callbacker(epoch, loss,d,trace)
+        i = length(trace)
         function ()
-            # i % 100 == 0 && println(@sprintf("Loss: %.4f", sum(d->Flux.data(loss(d...)),d)))
-            # i += 1
+            l = sum(d->Flux.data(loss(d...)),d)
+            increment!(trace,epoch,l)
+            i % 500 == 0 && println(@sprintf("Loss: %.4f", l))
         end
     end
 
@@ -68,7 +69,7 @@ end
 ## Generate validation data
 function valdata()
     vx,vu,vy = Vector{Float64}[],Vector{Float64}[],Vector{Float64}[]
-    for i = 20:80
+    for i = 20:60
         x,u = generate_data(sys,i, true)
         for j in 10:5:(sys.N-1)
             push!(vx, x[:,j])
@@ -90,9 +91,10 @@ f2 = @spawnat 2 begin
     srand(1)
     models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5e10, R2 = 100I)
+    trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I)
     for i = 1:3
         trainer(trajs[i], epochs=2000, jacprop=0, useprior=false)
+        # traceplot(trainer)
     end
     trainer
 end
@@ -103,9 +105,10 @@ f3 = @spawnat 3 begin
     srand(1)
     models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 5e10, R2 = 100I)
+    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I)
     for i = 1:3
         trainerj(trajs[i], epochs=1000, jacprop=1, useprior=true)
+        # traceplot(trainerj)
     end
     trainerj
 end
@@ -115,9 +118,10 @@ f4 = @spawnat 4 begin
     srand(1)
     models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
     opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 1, R2 = 100I)
+    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I)
     for i = 1:3
         trainerjn(trajs[i], epochs=1000, jacprop=1, useprior=false)
+        # traceplot(trainerjn)
     end
     trainerjn
 end
@@ -125,9 +129,12 @@ end
 pyplot()
 trainer,trainerj,trainerjn = fetch(f2), fetch(f3),fetch(f4)
 
-mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(1,3))
+mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,3))
 mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:both, useprior=true)
 mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:both, useprior=false)
+traceplot!(trainer, subplot=4)
+traceplot!(trainerj, subplot=5)
+traceplot!(trainerjn, subplot=6)
 gui()
 ##
 
@@ -152,4 +159,3 @@ end
 # TODO: see if error during first two iterations, when number of trajs is small, is smaller using jacprop
 # TODO: make jacprop magnitude an option std()/10
 # TODO: See if working better with different P ≢ 10
-# TODO: there is defenetely something wrong in fitting with prior

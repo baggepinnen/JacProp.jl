@@ -39,6 +39,7 @@ See also [`LTVModels`](@ref),  [`LTVModels.KalmanModel`](@ref)
     trajs::Vector{Trajectory} = Trajectory[]
     cb::cbT
     modelhistory = []
+    trace::History{Int,Float64} = History(Float64)
 end
 
 
@@ -51,7 +52,7 @@ train!(mt::ModelTrainer; epochs=1, jacprop=1)
 
 See also [`ModelTrainer`](@ref)
 """
-function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1, useprior=true)
+function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1, useprior=true, trace = mt.trace)
     @assert !isempty(mt.trajs) "No data in ModelTrainer"
     @unpack models,opts,losses,trajs = mt
     data1 = todata(mt)
@@ -60,10 +61,11 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1, useprior=true)
         data2 = [todata(sample_jacprop(mt, ltvmodels)) for i = 1:jacprop]
         data = chain(data1, data2...)
         for (loss, opt) in zip(losses,opts)
-            train!(loss, data, opt, cb=to_callback(mt.cb,loss,data1))
+            train!(loss, data, opt, cb=to_callback(mt.cb, epoch,loss,data1, trace))
         end
     end
     push!(mt.modelhistory, deepcopy(models))
+    trace
 end
 
 function fit_models(mt::ModelTrainer, useprior)

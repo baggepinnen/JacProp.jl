@@ -70,7 +70,7 @@ function get_minimum_loss(results, key)
 end
 
 function simulate(ms::AbstractEnsembleSystem,x::AbstractArray, testmode=true)
-    # Flux.testmode!.(ms, testmode)
+    Flux.testmode!.(ms, testmode)
     xsim = copy(x)
     ns = ms[1].nx
     for t = 2:size(x,2)
@@ -81,7 +81,7 @@ function simulate(ms::AbstractEnsembleSystem,x::AbstractArray, testmode=true)
 end
 
 function simulate(ms::EnsembleVelSystem,x::AbstractArray, testmode=true)
-    # Flux.testmode!.(ms, testmode)
+    Flux.testmode!.(ms, testmode)
     xsim = copy(x)
     for t = 2:size(x,2)
         @ensemble xsimt = ms(xsim[:,t-1])
@@ -95,13 +95,13 @@ end
 simulate(ms, t::Trajectory; kwargs...) = simulate(ms, t.xu; kwargs...)
 
 function predict(ms::AbstractEnsembleSystem, x::AbstractMatrix, testmode=true)
-    # Flux.testmode!.(ms, testmode)
+    Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
     mean(y).data, getfield.(extrema(y), :data)
 end
 
 function predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
-    # Flux.testmode!.(ms, testmode)
+    Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
     yh = mean(y).data
     h = ms[1].h
@@ -113,7 +113,7 @@ end
 predict(ms, t::Trajectory; kwargs...) = predict(ms, t.xu; kwargs...)
 
 function Flux.jacobian(ms::AbstractEnsembleSystem, x::AbstractArray, testmode=true)
-    # Flux.testmode!.(ms, testmode)
+    Flux.testmode!.(ms, testmode)
     # @show Flux.Tracker.grad(params.(ms[1]))
     # Flux.Tracker.zero_grad!.(params.(ms))
     jacs = [Flux.jacobian(m,x) for m in ms]
@@ -123,7 +123,7 @@ function Flux.jacobian(ms::AbstractEnsembleSystem, x::AbstractArray, testmode=tr
 end
 
 function Flux.jacobian(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
-    # Flux.testmode!.(ms, testmode)
+    Flux.testmode!.(ms, testmode)
     h = ms[1].h
     jacs = [[[I h*I h^2/2*eye(2)];Flux.jacobian(m,x)] for m in ms] # The h²/2*I in ∇ᵤ is an approximation since there are (very small) cross terms.
     jacmat = smartcat3(jacs)
