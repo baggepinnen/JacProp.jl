@@ -32,10 +32,11 @@ See also [`LTVModels`](@ref),  [`LTVModels.KalmanModel`](@ref)
     models
     opts
     losses
-    R1         = I
-    R2         = 10_000I
-    P0         = 10_000I
-    P::Float64 = 1.0
+    R1                = I
+    R2                = 10_000I
+    P0                = 10_000I
+    σdivider::Float64 = 10.
+    P::Float64        = 1.0
     trajs::Vector{Trajectory} = Trajectory[]
     cb::cbT
     modelhistory = []
@@ -54,7 +55,7 @@ See also [`ModelTrainer`](@ref)
 """
 function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1, useprior=true, trace = mt.trace)
     @assert !isempty(mt.trajs) "No data in ModelTrainer"
-    @unpack models,opts,losses,trajs = mt
+    @unpack models,opts,losses = mt
     data1 = todata(mt)
     ltvmodels = fit_models(mt, useprior)
     @progress for epoch = 1:epochs
@@ -77,8 +78,8 @@ end
 function sample_jacprop(mt::ModelTrainer, ltvmodels)
     perturbed_trajs = map(mt.trajs, ltvmodels) do traj, ltvmodel
         @unpack x,u,nx,nu = traj
-        xa = x .+ std(x,2)/10 .* randn(size(x))
-        ua = u .+ std(u,2)/10 .* randn(size(u))
+        xa = x .+ std(x,2)/mt.σdivider .* randn(size(x))
+        ua = u .+ std(u,2)/mt.σdivider .* randn(size(u))
         ya = LTVModels.predict(ltvmodel, xa, ua)
         Trajectory(xa,ua,ya)
     end

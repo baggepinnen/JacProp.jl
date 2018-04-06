@@ -1,7 +1,7 @@
 if length(workers()) == 1
     addprocs(4)
 end
-@everywhere using Revise
+# @everywhere using Revise
 using ParallelDataTransfer
 @everywhere include(Pkg.dir("DynamicMovementPrimitives","src","two_link.jl"))
 @everywhere using TwoLink, Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
@@ -19,7 +19,7 @@ using ParallelDataTransfer
         s1ind = (nx+nu+1):(nx+nu+nx)
     end
 
-    function generate_data(sys::TwoLinkSys, seed, validation=false; ufun=u->filt(ones(50),[50], 10u')')
+    function generate_data(sys::TwoLinkSys, seed, validation=false; ufun=u->filt(ones(100),[100], 10u')')
         @unpack N, nu, nx, h, σ0, sind, uind, s1ind = sys
         srand(seed)
         done = false
@@ -47,7 +47,7 @@ using ParallelDataTransfer
     end
 
     function callbacker(epoch, loss,d,trace)
-        i = length(trace)
+        i = length(trace) + epoch - 1
         function ()
             l = sum(d->Flux.data(loss(d...)),d)
             increment!(trace,epoch,l)
@@ -55,9 +55,9 @@ using ParallelDataTransfer
         end
     end
 
-    num_params = 10
+    num_params = 30
     wdecay     = 0
-    stepsize   = 0.05
+    stepsize   = 0.02
     const sys  = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
     true_jacobian(x,u) = true_jacobian(sys,x,u)
     nu         = sys.nu
@@ -90,10 +90,10 @@ sendto(collect(2:5), trajs=trajs, vt=vt)
 f2 = @spawnat 2 begin
     srand(1)
     models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-    opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I)
+    opts       = ADAM.(params.(models), stepsize, decay=0.0005)#; [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+    trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = 20)
     for i = 1:3
-        trainer(trajs[i], epochs=2000, jacprop=0, useprior=false)
+        trainer(trajs[i], epochs=20000, jacprop=0, useprior=false)
         # traceplot(trainer)
     end
     trainer
@@ -104,10 +104,10 @@ end
 f3 = @spawnat 3 begin
     srand(1)
     models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-    opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I)
+    opts       = ADAM.(params.(models), stepsize, decay=0.0005)#; [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+    trainerj  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 1000I, σdivider = 20)
     for i = 1:3
-        trainerj(trajs[i], epochs=1000, jacprop=1, useprior=true)
+        trainerj(trajs[i], epochs=10000, jacprop=1, useprior=true)
         # traceplot(trainerj)
     end
     trainerj
@@ -117,23 +117,23 @@ end
 f4 = @spawnat 4 begin
     srand(1)
     models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-    opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I)
+    opts       = ADAM.(params.(models), stepsize, decay=0.0005)#; [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+    trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 1000I, σdivider = 200)
     for i = 1:3
-        trainerjn(trajs[i], epochs=1000, jacprop=1, useprior=false)
+        trainerjn(trajs[i], epochs=10000, jacprop=1, useprior=false)
         # traceplot(trainerjn)
     end
     trainerjn
 end
 
-pyplot()
+pyplot(reuse=false)
 trainer,trainerj,trainerjn = fetch(f2), fetch(f3),fetch(f4)
 
-mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,3))
-mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:both, useprior=true)
-mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:both, useprior=false)
+mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,3), reuse=false, useprior=false)
+mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:y, useprior=true, show=false)
+mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:y, useprior=false)
 traceplot!(trainer, subplot=4)
-traceplot!(trainerj, subplot=5)
+traceplot!(trainerj, subplot=5, show=false)
 traceplot!(trainerjn, subplot=6)
 gui()
 ##
@@ -158,4 +158,5 @@ end
 # TODO: Sample points all over state-space and use as validation
 # TODO: see if error during first two iterations, when number of trajs is small, is smaller using jacprop
 # TODO: make jacprop magnitude an option std()/10
-# TODO: See if working better with different P ≢ 10
+# TODO: Validate vt in callback
+# TODO: why can a network perform better but train with higher final loss?
