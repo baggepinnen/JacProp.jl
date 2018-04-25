@@ -46,6 +46,7 @@ end
             end
             @series begin
                 c --> (onlyat == 0 ? cmapt[i] : :red)
+                markersize --> 5
                 real.(e), imag.(e)
             end
         end
