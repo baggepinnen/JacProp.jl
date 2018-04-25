@@ -1,7 +1,7 @@
 if length(workers()) == 1
     addprocs(4)
 end
-# @everywhere using Revise
+
 using ParallelDataTransfer
 @everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
 @everywhere using Flux: params, jacobian
@@ -138,12 +138,12 @@ end
 pyplot(reuse=false)
 trainer,trainerj,trainerjn = fetch(f2), fetch(f3),fetch(f4)
 
-mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,3), reuse=false, useprior=false)
-mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:y, useprior=true, show=false)
-mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:y, useprior=false)
-traceplot!(trainer, subplot=4)
-traceplot!(trainerj, subplot=5, show=false)
-traceplot!(trainerjn, subplot=6)
+mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,3), reuse=false, useprior=false, showltv=false, legend=false)
+mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:y, useprior=true, show=false, showltv=false, legend=false)
+mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:y, useprior=false, showltv=false, legend=false)
+traceplot!(trainer, subplot=4, title="Training error", xlabel="Epoch")
+traceplot!(trainerj, subplot=5, title="Training error", xlabel="Epoch")
+traceplot!(trainerjn, subplot=6, title="Training error", xlabel="Epoch")
 gui()
 ##
 

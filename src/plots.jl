@@ -205,7 +205,7 @@ end
 
 
 @userplot MutRegPlot
-@recipe function mutregplot(h::MutRegPlot; useprior = true)
+@recipe function mutregplot(h::MutRegPlot; useprior = true, showltv = true)
     @assert length(h.args) >= 2 "Call with (mt::ModelTrainer, t::Trajectory, true_jacobian::(x,u)->J)\n or (mt::ModelTrainer, true_jacobian::(x,u)->J"
     mt         = h.args[1]
     manytrajs  = length(h.args) == 2
@@ -219,7 +219,7 @@ end
 
     errorhistory = map(mt.modelhistory) do ms
         map(t) do t
-            ltvmodel = KalmanModel(mt, t, ms, useprior=useprior)
+            showltv && (ltvmodel = KalmanModel(mt, t, ms, useprior=useprior))
             error_nn = 0.
             error_ltv = 0.
             for (i,xu) in enumerate(t)
@@ -227,7 +227,7 @@ end
                 Jtrue = truejacfun(xi,ui)
                 Jm, Js = jacobian(ms, [xi;ui])
                 error_nn += eval_jac(Jm, Jtrue)
-                error_ltv += eval_jac([ltvmodel.At[:,:,i] ltvmodel.Bt[:,:,i]], Jtrue)
+                showltv && (error_ltv += eval_jac([ltvmodel.At[:,:,i] ltvmodel.Bt[:,:,i]], Jtrue))
             end
             error_nn/length(t), error_ltv/length(t)
         end
@@ -237,14 +237,11 @@ end
     ylims --> (0, Inf)
     N = length(errorhistory)
     errorhistory = [errorhistory[mi][ti] for mi in 1:N, ti in eachindex(errorhistory[1])]
-    if manytrajs
-        seriestype --> :scatter
-    else
-        seriestype --> :scatter
-    end
+    seriestype --> (showltv ? (:scatter) : (:bar))
+
     c1,c2 = :red, :blue
     @series (color --> c1;label := "NN"; ((1:N) .- 0.1, getindex.(errorhistory,1)))
-    @series (color --> c2;label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
+    showltv && @series (color --> c2;label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
 end
 
 
