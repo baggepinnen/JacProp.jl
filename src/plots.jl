@@ -205,7 +205,7 @@ end
 
 
 @userplot MutRegPlot
-@recipe function mutregplot(h::MutRegPlot; useprior = true, showltv=true)
+@recipe function mutregplot(h::MutRegPlot; useprior = true, showltv = true)
     @assert length(h.args) >= 2 "Call with (mt::ModelTrainer, t::Trajectory, true_jacobian::(x,u)->J)\n or (mt::ModelTrainer, true_jacobian::(x,u)->J"
     mt         = h.args[1]
     manytrajs  = length(h.args) == 2
