@@ -1,6 +1,7 @@
 if length(workers()) == 1
     addprocs(4)
 end
+default(grid=false)
 # @everywhere using Revise
 using ParallelDataTransfer
 @everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
@@ -138,12 +139,18 @@ end
 pyplot(reuse=false)
 trainer,trainerj,trainerjn = fetch(f2), fetch(f3),fetch(f4)
 
-mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,3), reuse=false, useprior=false)
-mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:y, useprior=true, show=false)
-mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:y, useprior=false)
-traceplot!(trainer, subplot=4)
-traceplot!(trainerj, subplot=5, show=false)
-traceplot!(trainerjn, subplot=6)
+# mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,3), reuse=false, useprior=false, showltv=false)
+# mutregplot!(trainerj, vt, true_jacobian, title="With jacprop and prior", subplot=2, link=:y, useprior=true, show=false, showltv=false)
+# mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop, no prior", subplot=3, link=:y, useprior=false, showltv=false)
+# traceplot!(trainer, subplot=3)
+# traceplot!(trainerj, subplot=5, show=false)
+# traceplot!(trainerjn, subplot=4)
+
+mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,2), reuse=false, useprior=false, showltv=false, legend=false, xaxis=(1:3), xaxis=(1:3))
+mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop", subplot=2, link=:y, useprior=false, showltv=false, legend=false, xaxis=(1:3))
+traceplot!(trainer, subplot=3, title="Training error", xlabel="Epoch", legend=false)
+traceplot!(trainerjn, subplot=4, title="Training error", xlabel="Epoch", legend=false)
+
 gui()
 ##
 
@@ -157,9 +164,13 @@ jacplot!(trainerjn.models, vt, label="With no", c=:green, fillalpha=0.2)
 gui()
 
 
-eigvalplot(trainer.models, vt, subplot=1, layout=3, title="g, Witout jacprop, wdecay=$wdecay")
-eigvalplot!(trainerj.models, vt, subplot=2, title="g, With jacprop and prior, wdecay=$wdecay")
-eigvalplot!(trainerjn.models, vt, subplot=3, title="g, With jacprop, no prior, wdecay=$wdecay")
+# eigvalplot(trainer.models, vt, subplot=1, layout=3, title="g, Witout jacprop, wdecay=$wdecay")
+# eigvalplot!(trainerj.models, vt, subplot=2, title="g, With jacprop and prior, wdecay=$wdecay")
+# eigvalplot!(trainerjn.models, vt, subplot=3, title="g, With jacprop, no prior, wdecay=$wdecay")
+
+eigvalplot(trainer.models, vt, true_jacobian, subplot=1, layout=2, title="g, Witout jacprop", markeralpha=0.05, link=:both, xlims=(-0.2, 1.2), ds=1, markerstrokealpha=0)
+eigvalplot!(trainerjn.models, vt, true_jacobian, subplot=2, title="g, With jacprop", markeralpha=0.05, link=:both, xlims=(-0.2, 1.2), ds=1, markerstrokealpha=0)
+plot!(ylims=(-0.8, 0.8))
 gui()
 
 ui = display_modeltrainer(trainerjn, size=(800,600))
@@ -230,10 +241,10 @@ end
 
 trainers,trainerds = fetch(f1), fetch(f2)
 trainerswd,trainerdswd = fetch(f3), fetch(f4)
-eigvalplot(trainers.models, vt, true_jacobian, title="f, wdecay=0", layout=4, subplot=1, markeralpha=0.02, ds=1)
-eigvalplot!(trainerds.models, vt, true_jacobian,  title="g, wdecay=0", subplot=2, markeralpha=0.02, ds=1)
-eigvalplot!(trainerswd.models, vt, true_jacobian,  title="f, wdecay=$wdecay", subplot=3, markeralpha=0.02, ds=1)
-eigvalplot!(trainerdswd.models, vt, true_jacobian,  title="g, wdecay=$wdecay", subplot=4, markeralpha=0.02, ds=1)
+eigvalplot(trainers.models, vt, true_jacobian, title="f, wdecay=0", layout=4, subplot=1, markeralpha=0.05, ds=1, markerstrokealpha=0)
+eigvalplot!(trainerds.models, vt, true_jacobian,  title="g, wdecay=0", subplot=2, markeralpha=0.05, ds=1, markerstrokealpha=0)
+eigvalplot!(trainerswd.models, vt, true_jacobian,  title="f, wdecay=$wdecay", subplot=3, markeralpha=0.05, ds=1, markerstrokealpha=0)
+eigvalplot!(trainerdswd.models, vt, true_jacobian,  title="g, wdecay=$wdecay", subplot=4, markeralpha=0.05, ds=1, markerstrokealpha=0)
 plot!(link=:both, xlims=(0,1.1), ylims=(-0.5, 0.5))
 gui()
 
@@ -246,7 +257,7 @@ for acti in 1:4
     actstr = actstr[1:2] == "NN" ? actstr[7:end] : actstr
     for tri in 1:4
         tr = [trainers, trainerds, trainerswd, trainerdswd][tri]
-        eigvalplot!([tr.models[acti]], vt, true_jacobian, title="$actstr, $(tri%2==0 ? "g" : "f"), wdecay=$(tri>2 ? wdecay : 0)", subplot=tri)
+        eigvalplot!([tr.models[acti]], vt, true_jacobian, title="$actstr, $(tri%2==0 ? "g" : "f"), wdecay=$(tri>2 ? wdecay : 0)", subplot=tri, markeralpha=0.05, ds=3, markerstrokealpha=0)
     end
     gui()
 end
