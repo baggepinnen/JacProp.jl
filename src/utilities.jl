@@ -1,5 +1,5 @@
 export AbstractSys, AbstractSystem, AbstractDiffSystem, AbstractVelSystem
-export System, DiffSystem, VelSystem
+export System, DiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem
 export simulate, predict, jacobians
 
 abstract type AbstractSys <: LTVModelsBase.AbstractModel end
@@ -52,6 +52,39 @@ function VelSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     VelSystem(m, nx, nu, h)
 end
 (m::VelSystem)(x) = m.m(x)
+
+
+# Recurrent systems ========================================================================
+@with_kw struct RecurrentSystem{T} <: AbstractSystem
+    m::T
+    nx::Int
+    nu::Int
+    h::Float64 = 1.0
+end
+function RecurrentSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    ny = nx
+    np = num_params
+    m  = Chain(Dense(nx+nu,np, activation), RNN(np,np), Dense(np, ny))
+    RecurrentSystem(m, nx, nu, h)
+end
+(m::RecurrentSystem)(x) = m.m(x)
+
+
+@with_kw struct RecurrentDiffSystem{T} <: AbstractDiffSystem
+    m::T
+    nx::Int
+    nu::Int
+    h::Float64 = 1.0
+end
+function RecurrentDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    ny = nx
+    np = num_params
+    m  = Chain(Dense(nx+nu,np, activation), RNN(np,np), Dense(np, ny))
+    RecurrentDiffSystem(m, nx, nu, h)
+end
+(m::RecurrentDiffSystem)(x) = m.m(x)+x[1:m.nx,:]
+
+# ==========================================================================================
 
 loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 
@@ -188,7 +221,7 @@ end
 get_res(res,n) = getindex.(res,n)
 
 try
-foreach(treelike, [System, DiffSystem, VelSystem])
+foreach(treelike, [System, DiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem])
 end
 
 function smartcat2(vv)

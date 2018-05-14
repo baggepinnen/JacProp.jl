@@ -53,16 +53,20 @@ train!(mt::ModelTrainer; epochs=1, jacprop=1)
 
 See also [`ModelTrainer`](@ref)
 """
-function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=1, useprior=true, trace = mt.trace)
+function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=0, useprior=true, trace = mt.trace)
     @assert !isempty(mt.trajs) "No data in ModelTrainer"
     @unpack models,opts,losses = mt
     data1 = todata(mt)
-    ltvmodels = fit_models(mt, useprior)
+    jacprop > 0 && (ltvmodels = fit_models(mt, useprior))
     @progress for epoch = 1:epochs
-        data2 = [todata(sample_jacprop(mt, ltvmodels)) for i = 1:jacprop]
-        data = chain(data1, data2...)
-        for (loss, opt) in zip(losses,opts)
-            train!(loss, data, opt, cb=to_callback(mt.cb, epoch,loss,data1, trace))
+        data = if jacprop > 0
+            data2 = [todata(sample_jacprop(mt, ltvmodels)) for i = 1:jacprop]
+            chain(data1, data2...)
+        else
+            data1
+        end
+        for (model,loss, opt) in zip(models,losses,opts)
+            train!(loss, data, opt, cb=to_callback(mt.cb, epoch,loss,data1, trace, model))
         end
     end
     push!(mt.modelhistory, deepcopy(models))
