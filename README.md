@@ -6,8 +6,19 @@
 
 [![codecov.io](http://codecov.io/github/baggepinnen/JacProp.jl/coverage.svg?branch=master)](http://codecov.io/github/baggepinnen/JacProp.jl?branch=master)
 
+This package implements neural network training with tangent space regularization for estimation of dynamics models of control systems on either of the forms
+
+```
+x' = f(x, u)     # ::System
+x' - x = g(x, u) # ::DiffSystem
+```
+
+With tangent space regularization, we penalize the difference between the Jacobian of the model in two consecutive time-steps. This encodes the prior belief that the system is *smooth* along the trajectory. We accomplish this by fitting an LTV model using [LTVModels.jl](https://github.com/baggepinnen/LTVModels.jl) where we include the desired regularization term in the cost function, and sample this model around a trajectory to add training data to fit the neural network. This additional training data will hopefully respect the locally linear behavior of the system and will help prevent overfitting. The concept is illustrated below.
+
+Pdf slides from ISMP, Bordeaux 2018, outlining the concept in greater detail, are available here [Slides (pdf)](docs/ismp_bagge.pdf)
 
 # Linear system example
+See the [pdf slides](docs/ismp_bagge.pdf) for introduction.
 
 ````julia
 # weave("linear_sys_tmp.jl", doctype="github", out_path="build")
@@ -67,7 +78,7 @@ function callbacker(epoch, loss,d,trace,model)
     function ()
         l = sum(d->Flux.data(loss(d...)),d)
         increment!(trace,epoch,l)
-        i % 500 == 0 && println(@sprintf(
+        i % 500 == 0 && println(@sprintf("Loss: %.4f", l))
     end
 end
 
@@ -220,7 +231,7 @@ plot!(link=:both, xlims=(0,1.1), ylims=(-0.5, 0.5))
 
 
 # Different activation functions
-
+This code produces the eigenvalue plots for different activation functions, shown in the [pdf slides](docs/ismp_bagge.pdf).
 ````julia
 # ui = display_modeltrainer(trainerdswd, size=(800,600))
 
