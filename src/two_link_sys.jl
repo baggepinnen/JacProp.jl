@@ -46,7 +46,7 @@ using ParallelDataTransfer
         Jtrue = expm([sys.h*Jtrue;zeros(2,6)])[1:4,:] # Discretize
     end
 
-    function callbacker(epoch, loss,d,trace)
+    function callbacker(epoch, loss,d,trace,model)
         i = length(trace) + epoch - 1
         function ()
             l = sum(d->Flux.data(loss(d...)),d)
@@ -120,11 +120,14 @@ f4 = @spawnat 4 begin
     opts       = ADAM.(params.(models), stepsize, decay=0.0005)#; [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
     trainerjn  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 1000I, σdivider = 200)
     for i = 1:3
-        trainerjn(trajs[i], epochs=10000, jacprop=1, useprior=false)
+        trainerjn(trajs[i], epochs=100, jacprop=1, useprior=false)
         # traceplot(trainerjn)
     end
+    trainerjn(epochs=10000)
     trainerjn
 end
+# predsimplot(trainerjn.models, trajs[1], title=["\$q_1\$" "\$\\dotq_1\$" "\$q_2\$" "\$\\dotq_2\$"])
+# predsimplot(trainerjn.models, Trajectory(generate_data(sys, 6)...), title=["\$q_1\$" "\$\\dotq_1\$" "\$q_2\$" "\$\\dotq_2\$"])
 
 pyplot(reuse=false)
 trainer,trainerj,trainerjn = fetch(f2), fetch(f3),fetch(f4)

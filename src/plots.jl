@@ -1,16 +1,18 @@
-
+"""
+plot_Trajectory(t::Trajectory; filtering=0, control=true)
+"""
+plot_Trajectory
 @recipe function plot_Trajectory(t::Trajectory; filtering=0, control=true)
     layout --> (control ? (2,1) : 1)
     show --> false
+    xlabel --> "Time"
     @series begin
         title --> "States"
-        xlabel --> "Time"
         control && (subplot --> 1)
         filtering > 0 ? filt(ones(filtering),[filtering], t.x') : t.x'
     end
     control && @series begin
         title --> "Control signal"
-        xlabel --> "Time"
         subplot --> 2
         filtering > 0 ? filt(ones(filtering),[filtering], t.u') : t.u'
     end
@@ -21,6 +23,10 @@ end
 
 @userplot EigvalPlot
 
+"""
+eigvalplot(h::EigvalPlot; ds=10, cont=false, onlyat=0)
+"""
+eigvalplot
 @recipe function eigvalplot(h::EigvalPlot; ds=10, cont=false, onlyat=0)
     ms = h.args[1]
     t = h.args[2]
@@ -118,6 +124,10 @@ end
 
 
 @userplot PredPlot
+"""
+predplot(models, traj; filtering=1)
+"""
+PredPlot
 @recipe function predplot(h::PredPlot; filtering=1)
     ms = h.args[1]
     t = h.args[2]
@@ -130,6 +140,10 @@ end
 end
 
 @userplot SimPlot
+"""
+simplot(models, traj; filtering=1)
+"""
+SimPlot
 @recipe function simplot(h::SimPlot; filtering=1)
     ms = h.args[1]
     t = h.args[2]
@@ -139,6 +153,10 @@ end
 end
 
 @userplot PredSimPlot
+"""
+predsimplot(models, traj; filtering=1)
+"""
+predsimplot
 @recipe function predsimplot(h::PredSimPlot; filtering=1)
     ms = h.args[1]
     t = h.args[2]
@@ -158,12 +176,13 @@ end
     end
 end
 
-"""
-    jacplot(model(s), t [,truejac::(x,u)->J])
-"""
-jacplot
+
 
 @userplot JacPlot
+"""
+jacplot(models, traj [, true_jac::Function]; ds=10, cont=false)
+"""
+jacplot
 @recipe function jacplot(h::JacPlot; ds=10, cont=false)
     ms = h.args[1]
     t = h.args[2]
@@ -205,6 +224,11 @@ end
 
 
 @userplot MutRegPlot
+"""
+mutregplot(modeltrainer, trajs, truejacfun; useprior = true, showltv = true)
+mutregplot(modeltrainer, truejacfun; useprior = true, showltv = true)
+"""
+mutregplot
 @recipe function mutregplot(h::MutRegPlot; useprior = true, showltv = true)
     @assert length(h.args) >= 2 "Call with (mt::ModelTrainer, t::Trajectory, true_jacobian::(x,u)->J)\n or (mt::ModelTrainer, true_jacobian::(x,u)->J"
     mt         = h.args[1]
@@ -248,6 +272,10 @@ end
 
 
 @userplot TracePlot
+"""
+traceplot(h::TracePlot)
+"""
+traceplot
 @recipe function traceplot(h::TracePlot)
     trace         = h.args[1]
     if !(trace isa ValueHistory)
