@@ -117,7 +117,7 @@ Generate training trajectories
 ````julia
 trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 ````
-# Without jacprop
+### Without jacprop
 
 ````julia
 srand(1)
@@ -130,7 +130,7 @@ end
 ````
 
 
-# With jacprop and prior
+### With jacprop and prior
 
 ````julia
 srand(1)
@@ -142,7 +142,7 @@ for i = 1:3
 end
 ````
 
-# With jacprop no prior
+### With jacprop no prior
 
 ````julia
 srand(1)
@@ -154,7 +154,7 @@ for i = 1:3
 end
 ````
 
-# Visualize result
+### Visualize result
 
 ````julia
 pyplot(reuse=false)
@@ -168,9 +168,13 @@ traceplot!(trainerjn, subplot=4, title="Training error", xlabel="Epoch", legend=
 
 ![](figures/linear_sys_tmp_7_1.svg)
 
+The top row shows the error (Frobenius norm) in the Jacbians for several points sampled randomly in the state space. The bottow row shows the traing errors. The training errors are lower without jacprop, but he greater error in the Jacobians for the validation data indicates overfitting, which is prevented by jacprop.
 
-# Weight decay
-## Weight decay off
+
+
+
+## Weight decay
+### Weight decay off
 
 ````julia
 srand(1)
@@ -192,7 +196,7 @@ for i = 1:3
 end
 ````
 
-## Weight decay on
+### Weight decay on
 
 ````julia
 wdecay = 0.1
@@ -230,7 +234,7 @@ plot!(link=:both, xlims=(0,1.1), ylims=(-0.5, 0.5))
 ![](figures/linear_sys_tmp_10_1.png)
 
 
-# Different activation functions
+## Different activation functions
 This code produces the eigenvalue plots for different activation functions, shown in the [pdf slides](docs/ismp_bagge.pdf).
 ````julia
 # ui = display_modeltrainer(trainerdswd, size=(800,600))
