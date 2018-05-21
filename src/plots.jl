@@ -24,7 +24,7 @@ end
 @userplot EigvalPlot
 
 """
-eigvalplot(h::EigvalPlot; ds=10, cont=false, onlyat=0)
+eigvalplot(models, traj; ds=10, cont=false, onlyat=0)
 """
 eigvalplot
 @recipe function eigvalplot(h::EigvalPlot; ds=10, cont=false, onlyat=0)
@@ -132,11 +132,14 @@ PredPlot
     ms = h.args[1]
     t = h.args[2]
     lab --> "Prediction"
+    Flux.reset!.(getfield.(ms, :m))
     if ms isa Vector
-        filt(ones(filtering),[filtering], predict(ms,t)[1]')
+        r = filt(ones(filtering),[filtering], predict(ms,t)[1]')
     else
-        filt(ones(filtering),[filtering], LTVModelsBase.predict(ms,t)')
+        r = filt(ones(filtering),[filtering], LTVModelsBase.predict(ms,t)')
     end
+    Flux.reset!.(getfield.(ms, :m))
+    r
 end
 
 @userplot SimPlot
@@ -149,7 +152,10 @@ SimPlot
     t = h.args[2]
     lab --> "Simulation"
     simfun = ms isa LTVModelsBase.AbstractModel ? LTVModelsBase.simulate : simulate
-    filt(ones(filtering),[filtering], simfun(ms,t)')
+    Flux.reset!.(getfield.(ms, :m))
+    r = filt(ones(filtering),[filtering], simfun(ms,t)')
+    Flux.reset!.(getfield.(ms, :m))
+    r
 end
 
 @userplot PredSimPlot
@@ -165,15 +171,18 @@ predsimplot
         label --> "True"
         filt(ones(filtering),[filtering], t.x')
     end
+    Flux.reset!.(getfield.(ms, :m))
     @series begin
         lab --> "Prediction"
         filt(ones(filtering),[filtering], predict(ms,t)[1]')
     end
-
+    Flux.reset!.(getfield.(ms, :m))
     @series begin
         lab --> "Simulation"
         filt(ones(filtering),[filtering], simulate(ms,t)')
     end
+    Flux.reset!.(getfield.(ms, :m))
+    nothing
 end
 
 
@@ -266,9 +275,6 @@ mutregplot
     @series (color --> c1;label := "NN"; ((1:N) .- 0.1, getindex.(errorhistory,1)))
     showltv && @series (color --> c2;label := "LTV"; ((1:N) .+ 0.1, getindex.(errorhistory,2)))
 end
-
-
-
 
 
 @userplot TracePlot

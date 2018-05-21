@@ -54,11 +54,16 @@ function true_jacobian(sys::LinearSys, x, u)
 end
 
 function callbacker(epoch, loss,d,trace,model)
-    i = length(trace) + epoch - 1
+    printed = false
+    info("New callbacker, epoch $epoch")
     function ()
+        info("callback, epoch $epoch")
         l = sum(d->Flux.data(loss(d...)),d)
         increment!(trace,epoch,l)
-        i % 500 == 0 && println(@sprintf("Loss: %.4f", l))
+        if !printed && epoch % 500 == 0
+            println(@sprintf("Loss: %.4f", l))
+            printed = true
+        end
     end
 end
 

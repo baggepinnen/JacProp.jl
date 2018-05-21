@@ -1,5 +1,5 @@
 export AbstractSys, AbstractSystem, AbstractDiffSystem, AbstractVelSystem
-export System, DiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem
+export System, DiffSystem, StabilizedDiffSystem, NominalDiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem
 export simulate, predict, jacobians
 
 abstract type AbstractSys <: LTVModelsBase.AbstractModel end
@@ -38,6 +38,37 @@ function DiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
 end
 (m::DiffSystem)(x) = m.m(x)+x[1:m.nx,:]
 
+@with_kw struct StabilizedDiffSystem{T} <: AbstractDiffSystem
+    τ::Float64
+    m::T
+    nx::Int
+    nu::Int
+    h::Float64 = 1.0
+end
+function StabilizedDiffSystem(τ::Float64,nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    ny = nx
+    np = num_params
+    m  = Chain(Dense(nx+nu,np, activation), Dense(np, ny))
+    StabilizedDiffSystem(τ, m, nx, nu, h)
+end
+(m::StabilizedDiffSystem)(x) = m.m(x)+ m.τ*x[1:m.nx,:]
+
+@with_kw struct NominalDiffSystem{T} <: AbstractDiffSystem
+    A::Matrix{Float64}
+    B::Matrix{Float64}
+    m::T
+    nx::Int
+    nu::Int
+    h::Float64 = 1.0
+end
+function NominalDiffSystem(A::AbstractMatrix,B::AbstractMatrix,nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    ny = nx
+    np = num_params
+    m  = Chain(Dense(nx+nu,np, activation), Dense(np, ny))
+    NominalDiffSystem(A, B, m, nx, nu, h)
+end
+(m::NominalDiffSystem)(x) = m.m(x) .+ m.A*x[1:m.nx,:] .+ m.B*x[1+m.nx:end,:]
+
 
 @with_kw struct VelSystem{T} <: AbstractVelSystem
     m::T
@@ -64,7 +95,7 @@ end
 function RecurrentSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     ny = nx
     np = num_params
-    m  = Chain(Dense(nx+nu,np, activation), RNN(np,np), Dense(np, ny))
+    m  = Chain(Dense(nx+nu,np, activation), RNN(np,np), Dense(np,np,activation), Dense(np, ny))
     RecurrentSystem(m, nx, nu, h)
 end
 (m::RecurrentSystem)(x) = m.m(x)
@@ -79,7 +110,7 @@ end
 function RecurrentDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     ny = nx
     np = num_params
-    m  = Chain(Dense(nx+nu,np, activation), RNN(np,np), Dense(np, ny))
+    m  = Chain(Dense(nx+nu,np, activation), RNN(np,np), Dense(np,np,activation), Dense(np, ny))
     RecurrentDiffSystem(m, nx, nu, h)
 end
 (m::RecurrentDiffSystem)(x) = m.m(x)+x[1:m.nx,:]
@@ -221,7 +252,7 @@ end
 get_res(res,n) = getindex.(res,n)
 
 try
-foreach(treelike, [System, DiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem])
+foreach(treelike, [System, DiffSystem, StabilizedDiffSystem, NominalDiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem])
 end
 
 function smartcat2(vv)

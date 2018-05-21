@@ -49,7 +49,7 @@ include("utilities.jl")
 to_callback(cb,args...) = methods(cb).mt.max_args > 1 ? cb(args...) : cb
 
 """
-train!(mt::ModelTrainer; epochs=1, jacprop=1)
+train!(mt::ModelTrainer; epochs=1, jacprop=0, useprior=true, trace = mt.trace)
 
 See also [`ModelTrainer`](@ref)
 """
@@ -58,7 +58,8 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=0, useprior=true, trace
     @unpack models,opts,losses = mt
     data1 = todata(mt)
     jacprop > 0 && (ltvmodels = fit_models(mt, useprior))
-    @progress for epoch = 1:epochs
+    startepoch = length(mt.trace)+1
+    @progress for epoch = startepoch:startepoch+epochs-1
         data = if jacprop > 0
             data2 = [todata(sample_jacprop(mt, ltvmodels)) for i = 1:jacprop]
             chain(data1, data2...)
@@ -96,8 +97,8 @@ function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models;
     @unpack R1,R2,P0  = mt
     T                 = length(t)
     if useprior
-        model = KalmanModel(zeros(nx,nx,T),zeros(nx,nu,T),zeros(1,1,T),false)
-        Jm, Js = jacobians(ms, t)
+        model    = KalmanModel(zeros(nx,nx,T),zeros(nx,nu,T),zeros(1,1,T),false)
+        Jm, Js   = jacobians(ms, t)
         Pt       = cat(3,[diagm(Js[:,i].^2 .+ P) for i=1:T]...) # TODO: magic number
         fx       = cat(3,[reshape(Jm[1:nx^2,i], nx,nx) for i=1:T]...)
         fu       = cat(3,[reshape(Jm[nx^2+1:end,i], nx,nu) for i=1:T]...)
@@ -124,7 +125,7 @@ end
 
 (mt::ModelTrainer)(data::Matrix...; kwargs...) = mt(Trajectory(data...); kwargs...)
 
-Lazy.@forward ModelTrainer.models predict, simulate, Flux.jacobian
+Lazy.@forward ModelTrainer.models predict, simulate, Flux.jacobian, eigvalplot, jacplot
 
 include("plots.jl")
 
