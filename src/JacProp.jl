@@ -28,7 +28,7 @@ ModelTrainer
 
 See also [`LTVModels`](@ref),  [`LTVModels.KalmanModel`](@ref)
 """
-@with_kw mutable struct ModelTrainer{cbT}
+@with_kw mutable struct ModelTrainer{cbT,tT}
     models
     opts
     losses
@@ -40,7 +40,7 @@ See also [`LTVModels`](@ref),  [`LTVModels.KalmanModel`](@ref)
     trajs::Vector{Trajectory} = Trajectory[]
     cb::cbT
     modelhistory = []
-    trace::History{Int,Float64} = History(Float64)
+    trace::tT = History(Float64)
 end
 
 
