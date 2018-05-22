@@ -67,7 +67,7 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=0, useprior=true, trace
             data1
         end
         for (model,loss, opt) in zip(models,losses,opts)
-            train!(loss, data, opt, cb=to_callback(mt.cb, epoch,loss,data1, trace, model))
+            train!(loss, data, opt, cb=to_callback(mt.cb, epoch,loss,data1, trace, model, mt))
         end
     end
     push!(mt.modelhistory, deepcopy(models))
