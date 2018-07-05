@@ -6,7 +6,7 @@
 
 [![codecov.io](http://codecov.io/github/baggepinnen/JacProp.jl/coverage.svg?branch=master)](http://codecov.io/github/baggepinnen/JacProp.jl?branch=master)
 
-This package implements neural network training with tangent space regularization for estimation of dynamics models of control systems on either of the forms
+This package implements [neural network training with tangent space regularization for estimation of dynamics models](https://arxiv.org/abs/1806.09919) of control systems on either of the forms
 
 ```
 x' = f(x, u)     # ::System
@@ -250,3 +250,12 @@ for acti in 1:4
     gui()
 end
 ````
+
+# References
+https://arxiv.org/abs/1806.09919
+@misc{1806.09919,
+Author = {Fredrik Bagge Carlson and Rolf Johansson and Anders Robertsson},
+Title = {Tangent-Space Regularization for Neural-Network Models of Dynamical Systems},
+Year = {2018},
+Eprint = {arXiv:1806.09919},
+}
