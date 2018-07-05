@@ -252,10 +252,12 @@ end
 ````
 
 # References
-https://arxiv.org/abs/1806.09919
+https://arxiv.org/abs/1806.09919  
+```
 @misc{1806.09919,
 Author = {Fredrik Bagge Carlson and Rolf Johansson and Anders Robertsson},
 Title = {Tangent-Space Regularization for Neural-Network Models of Dynamical Systems},
 Year = {2018},
 Eprint = {arXiv:1806.09919},
 }
+```
