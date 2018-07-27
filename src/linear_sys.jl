@@ -3,7 +3,7 @@ if length(workers()) == 1 #src
 end #src
 default(grid=false) #src
 using ParallelDataTransfer #src
-@everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase #src
+@everywhere using Parameters, JacProp, LTVModels, LTVModelsBase #src
 @everywhere using Flux: params, jacobian #src
 @everywhere using Flux.Optimise: Param, optimiser, expdecay #src
 @everywhere begin #src

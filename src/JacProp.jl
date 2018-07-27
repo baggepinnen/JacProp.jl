@@ -1,6 +1,6 @@
 module JacProp
 
-export Trajectory, default_activations, ModelTrainer, sample_jacprop, push!, train!, display_modeltrainer
+export Trajectory, default_activations, ModelTrainer, sample_jacprop, push!, train!, display_modeltrainer, getter
 
 using LTVModelsBase, Parameters, Reexport, Lazy, Juno, FunctionEnsembles
 @reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils

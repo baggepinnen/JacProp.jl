@@ -196,10 +196,23 @@ end
 
 Flux.jacobian(ms, t::Trajectory; kwargs...) = Flux.jacobian(ms, t.xu; kwargs...)
 
-models(mt::ModelTrainer) = getindex.(mt.models, :m)
-models(systems::Vector{<:AbstractSys}) = getindex.(systems, :m)
+models(mt::ModelTrainer) = getfield.(mt.models, :m)
+models(systems::Vector{<:AbstractSys}) = getfield.(systems, :m)
 models(results::AbstractVector) = [r[:m] for r in results]
 models(results::Associative) = [r[:m]]
+
+function LTVModels.KalmanModel(ms::AbstractEnsembleSystem, t::Trajectory)
+    xu = t.xu
+    N  = size(xu,2)
+    J  = map(1:length(t)) do i
+        Jm, Js = jacobian(ms, xu[:,i])
+        Jm, Js
+    end
+    At = cat(3,[J[i][1][:,1:t.nx] for i = 1:length(t)]...)
+    Bt = cat(3,[J[i][1][:,t.nx+1:end] for i = 1:length(t)]...)
+    Pt = cat(3,[diagm(J[i][2][:]).^2 for i = 1:length(t)]...)
+    LTVModels.KalmanModel(At,Bt,Pt,true)
+end
 
 
 function jacobians(ms, t, ds=1)

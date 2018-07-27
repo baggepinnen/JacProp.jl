@@ -1,10 +1,16 @@
-if length(workers()) == 1
+const PARALLEL = false
+macro ifparallel(e)
+    if PARALLEL
+        return e
+    end
+end
+@ifparallel if length(workers()) == 1
     addprocs(4)
 end
 pyplot()
 default(grid=false)
 # @everywhere using Revise
-using ParallelDataTransfer
+@ifparallel using ParallelDataTransfer
 @everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
 @everywhere using Flux: params, jacobian
 @everywhere using Flux.Optimise: Param, optimiser, expdecay
@@ -57,21 +63,29 @@ using ParallelDataTransfer
         [sys.A sys.B]
     end
 
+    lastprint = 0
     function callbacker(epoch, loss,d,trace,model)
-        i = length(trace) + epoch - 1
         function ()
+            global lastprint
             Flux.reset!(model.m)
             l = sum(d->Flux.data(loss(d...)),d)
-            increment!(trace,epoch,l)
-            i % 500 == 0 && println(@sprintf("Loss: %.4f", l))
             Flux.reset!(model.m)
+            increment!(trace,epoch,l)
+            if epoch % 20 == 0 && lastprint != epoch
+                @show epoch
+                println(@sprintf("Loss: %.4f", l))
+                plot(trace, reuse=true, yscale=:log10)
+                gui()
+                lastprint = epoch
+            end
         end
     end
 
-    num_params = 30
+
+    num_params = 20
     wdecay     = 0
-    stepsize   = 0.02
-    const sys  = LinearSys(1, N=200, h=0.02, σ0 = 0.01)
+    stepsize   = 0.005
+    const sys  = LinearSys(1, N=200, h=0.02, σ0 = 1)
     true_jacobian(x,u) = true_jacobian(sys,x,u)
     nu         = sys.nu
     nx         = sys.nx
@@ -79,109 +93,82 @@ using ParallelDataTransfer
 end
 
 
-## Generate validation data
-function valdata()
-    vx,vu,vy = Vector{Float64}[],Vector{Float64}[],Vector{Float64}[]
-    for i = 20:60
-        x,u = generate_data(sys,i, true)
-        for j in 10:5:(sys.N-1)
-            push!(vx, x[:,j])
-            push!(vy, x[:,j+1])
-            push!(vu, u[:,j])
-        end
-    end
-    hcat(vx...),hcat(vu...),hcat(vy...)
-end
-vx,vu,vy = valdata()
-vt = Trajectory(vx,vu,vy)
-
-trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
-
-sendto(collect(2:5), trajs=trajs, vt=vt)
+numtrajs = 3
+vt = Trajectory(generate_data(sys, 100)...) #' Generate validation data
+trajs = [Trajectory(generate_data(sys, i)...) for i = 1:numtrajs] #' Generate training data
+@ifparallel sendto(collect(2:nprocs()), trajs=trajs, vt=vt) # Send data to workers
 
 
 
-wdecay = 0.0
 # f1 = @spawnat 4 begin
 srand(1)
 models     = [RecurrentSystem(nx,nu,num_params, a) for a in default_activations]
-opts       = ADAM.(params.(models), stepsize, decay=0.0005)#; [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+opts       = ADAM.(params.(models), stepsize, decay=0.0005)
 trainers  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker)
-# for i = 1:3
-    trainers(trajs[i], epochs=0, jacprop=0, useprior=false)
-    # traceplot(trainers)
-# end
+for i = 1:numtrajs
+    trainers(trajs[i], epochs=0, jacprop=0)
+end
 trainers
 # endtrainerswd
-trainers(epochs=5000, jacprop=0)
+trainers(epochs=2000, jacprop=0)
+predsimplot(trainers.models, vt, layout=10)
 traceplot(trainers, reuse=false)
 
-Flux.reset!.(getfield.(trainers.models, :m))
-simplot(trainers.models, trainers.trajs[1], layout=10)
-plot!(trainers.trajs[1], ls=:dash, control=false)
 
 
 # f2 = @spawnat 2 begin
 srand(1)
 models     = [RecurrentDiffSystem(nx,nu,num_params, a) for a in default_activations]
-opts       = ADAM.(params.(models), stepsize, decay=0.0005)#; [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+opts       = ADAM.(params.(models), stepsize, decay=0.0005)
 trainerds  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker)
-for i = 1:3
-    trainerds(trajs[i], epochs=0, jacprop=0, useprior=false)
-    # traceplot(trainerds)
+for i = 1:numtrajs
+    trainerds(trajs[i], epochs=0, jacprop=0)
 end
 trainerds
 # end
-trainerds(epochs=5000, jacprop=0)
+trainerds(epochs=2000, jacprop=0)
+predsimplot(trainerds.models, vt, layout=10)
 traceplot(trainerds, reuse=false)
 
-Flux.reset!.(getfield.(trainerds.models, :m))
-simplot(trainerds.models, trainerds.trajs[1], layout=10)
-plot!(trainerds.trajs[1], ls=:dash, control=false)
 
 
 
-wdecay = 0.1
+wdecay = 0.01
 # f3 = @spawnat 3 begin
 srand(1)
 models     = [RecurrentSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 trainerswd  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker)
-for i = 1:3
-    trainerswd(trajs[i], epochs=0, jacprop=0, useprior=false)
-    # traceplot(trainerswd)
+for i = 1:numtrajs
+    trainerswd(trajs[i], epochs=0, jacprop=0)
 end
 trainerswd
 # end
-trainerswd(epochs=5000, jacprop=0)
+trainerswd(epochs=2000, jacprop=0)
+predsimplot(trainerswd.models, vt, layout=10)
 traceplot(trainerswd, reuse=false)
 
-Flux.reset!.(getfield.(trainerswd.models, :m))
-simplot(trainerswd.models, trainerswd.trajs[1], layout=10)
-plot!(trainerswd.trajs[1], ls=:dash, control=false)
 
 
 # f4 = @spawnat 1 begin
 srand(1)
-models     = [RecurrentDiffSystem(nx,nu,num_params, a) for a in default_activations]
+models     = [RecurrentDiffSystem(nx,nu,num_params, a) for a in default_activations[3:3]]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 trainerdswd  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker)
-for i = 1:3
-    trainerdswd(trajs[i], epochs=0, jacprop=0, useprior=false)
+for i = 1:numtrajs
+    trainerdswd(trajs[i], epochs=0, jacprop=0)
     # traceplot(trainerdswd)
 end
 trainerdswd
 # end
-trainerdswd(epochs=5000, jacprop=0)
+trainerdswd(epochs=20000, jacprop=0)
+predsimplot(trainerdswd.models, vt, layout=10)
 traceplot(trainerdswd, reuse=false)
 
-Flux.reset!.(getfield.(trainerdswd.models, :m))
-simplot(trainerdswd.models, trainerdswd.trajs[1], layout=10)
-plot!(trainerdswd.trajs[1], ls=:dash, control=false)
 
 
-trainers,trainerds = fetch(f1), fetch(f2)
-trainerswd,trainerdswd = fetch(f3), fetch(f4)
+# trainers,trainerds = fetch(f1), fetch(f2)
+# trainerswd,trainerdswd = fetch(f3), fetch(f4)
 
 traceplot(trainers, layout=4)
 traceplot!(trainerds, subplot=2)
@@ -208,3 +195,5 @@ for acti in 1:4
     end
     gui()
 end
+
+JLD.@save "workspace" trainers trainerds trainerswd trainerdswd trajs
