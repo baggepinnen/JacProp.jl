@@ -1,6 +1,10 @@
+# pyplot()
 default(grid=false) #src
-using Parameters, ForwardDiff, LTVModelsBase, ValueHistories
+plot(randn(10))
+# closeall();gui()
+using Parameters, ForwardDiff, ReverseDiff, LTVModelsBase, ValueHistories, JLD
 const Diff = ForwardDiff
+const RDiff = ReverseDiff
 @with_kw struct LinearSys
     A
     B
@@ -47,10 +51,10 @@ function true_jacobian(sys::LinearSys, x, u)
 end
 
 
-num_params = 20
+num_params = 30
 wdecay     = 0
 stepsize   = 0.02
-const sys  = LinearSys(1, N=200, h=0.02, σ0 = 0.01)
+const sys  = LinearSys(1, nx=5, N=200, h=0.02, σ0 = 0.01)
 true_jacobian(x,u) = true_jacobian(sys,x,u)
 nu         = sys.nu
 nx         = sys.nx
@@ -75,6 +79,12 @@ const vt = Trajectory(vx,vu,vy)
 
 # Generate training trajectories
 const trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
+# TODO: take care of separate trajs
+function todata(trajs::Vector{Trajectory})
+    xu = hcat(getfield.(trajs,:xu)...)
+    y = hcat(getfield.(trajs,:y)...)
+    xu, y
+end
 
 function i2m(w,i,sizes)
     s = [1; cumsum([prod.(sizes)...]) .+ 1]
@@ -86,56 +96,59 @@ function pred(w,x,sizes)
     for i=1:2:length(sizes)-2
         state = tanh.(i2m(w,i,sizes)*state .+ i2m(w,i+1,sizes))
     end
-    return i2m(w,length(sizes)-1,sizes)*state .+ i2m(w,length(sizes),sizes)
+    return i2m(w,length(sizes)-1,sizes)*state .+ i2m(w,length(sizes),sizes) .+ x[1:nx,:]
 end
 
 
-
-cost(jacfun) = cost
 cost(w,x,y)  = sum(abs2, pred(w,x,sizes) .- y)/size(y,2)
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
 cost(w,data) = cost(w, data...)
 
 function loss(w,x,y)
-    model(x)    = pred(w,x,sizes)
-    jcfg        = Diff.JacobianConfig(model, x[:,1])
-    jacobian(x) = Diff.jacobian(model, x, jcfg)
+    chunk = Diff.Chunk(x[:,1])
     function lf(w)
+        # println("Entering loss function, typeof(w):", typeof(w))
+        model(x)    = pred(w,x,sizes)
+        jcfg        = Diff.JacobianConfig(model, x[:,1], chunk)
+        jacobian(x) = Diff.jacobian(model, x, jcfg)
         l = cost(w,x,y)
         J2 = zeros(nx+nu, nx)
         J1 = jacobian(x[:,1])
         for t = 2:size(x,2)
             J2 = jacobian(x[:,t])
-            l += sum(abs2.(J1.-J2))
+            l += 2sum(abs2.(J1.-J2))
             J1 = J2
         end
         l
     end
 end
 
-# TODO: take care of separate trajs
-function todata(trajs::Vector{Trajectory})
-    xu = hcat(getfield.(trajs,:xu)...)
-    y = hcat(getfield.(trajs,:y)...)
-    xu, y
-end
+##
 
 function runtrain(w, loss; epochs = 500)
     dtrn        = todata(trajs)
     dtst        = todata([vt])
     x,y         = dtrn
     lossfun     = loss(w,x,y)
-    gcfg        = Diff.GradientConfig(lossfun, w)
-    gradient(w) = Diff.gradient(lossfun, w, gcfg)
+    gcfg        = RDiff.GradientConfig(w)
+    tape        = RDiff.GradientTape(lossfun, w, gcfg) |> RDiff.compile
+    # gradient(w) = Diff.gradient(lossfun, w, gcfg)
     trace       = History(Float64)
     tracev      = History(Float64)
     push!(trace, 0, lossfun(w))
     push!(tracev, 0, cost(w,dtst))
+    g = similar(w)
+    m = zeros(size(g))
+    plot(reuse=false)
     for epoch=1:epochs
-        g = gradient(w)
-        # @show size.((g,w))
-        @. w -= 0.01g
-        if epoch % 2 == 0
+        lossfun     = loss(w,x,y)
+        # gcfg        = Diff.GradientConfig(lossfun, w)
+        # gradient(w) = RDiff.gradient!(g,tape, w)
+        RDiff.gradient!(g,tape,w)
+        # RDiff.gradient!(g, lossfun, w, gcfg)
+        @. m = 0.002g + 0.85m
+        @. w -= m
+        if epoch % 5 == 0
             push!(trace, epoch, lossfun(w))
             push!(tracev, epoch, cost(w,dtst))
             plot(trace, reuse=true)
@@ -146,44 +159,56 @@ function runtrain(w, loss; epochs = 500)
     trace,tracev
 end
 
-sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
+const sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
 tovec(w) = vcat([vec(w) for w in w]...)
 
 srand(1)
-w1 = [ 0.1f0*randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1f0*randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
+w1 = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
 w1 = tovec(w1)
 w2 = deepcopy(w1)
 
+res = runtrain(w1, (w,x,y)-> (w-> cost(w,x,y)), epochs=300)
+resj = runtrain(w2, loss, epochs=1000)
+# @save "res1.jld" res w1
+@save "resj2.jld" resj w2
+##
 
-# res = runtrain(w1, cost, epochs=10)
-resj = runtrain(w2, loss, epochs=10)
 
-
-
-w = copy(w1)
-model(x)    = pred(w,x,sizes)
-const dtrn        = todata(trajs)
-const dtst        = todata([vt])
-const x,y         = dtrn
-const jcfg        = Diff.JacobianConfig(model, x[:,1])
+# Eval jac
+model(x)    = pred(w2,x,sizes)
+jcfg        = Diff.JacobianConfig(model, vt.xu[:,1])
 jacobian(x) = Diff.jacobian(model, x, jcfg)
+jacs = vcat([eigvals(jacobian(vt.xu[:,i])[1:nx,1:nx]) for i = 1:length(vt)]...)
+scatter(real.(jacs), imag.(jacs))
+scatter!(real.(eigvals(sys.A)), imag.(eigvals(sys.A)))
 
-jacobian(x[:,1])
 
-function test(w)
-    l = cost(w,x,y)
-    J2 = zeros(nx+nu, nx)
-    J1 = jacobian(x[:,1])
-    for t = 2:size(x,2)
-        J2 = jacobian(x[:,t])
-        l += sum(abs2.(J1.-J2))
-        J1 = J2
+
+
+# Simple test
+using BenchmarkTools
+using ForwardDiff
+const Diff = ForwardDiff
+w = randn(20,20)
+# x = [randn(20) for i = 1:100]
+x = randn(20,100)
+f(w::AbstractMatrix,x) = w*x
+f(w::AbstractVector,x) = f(reshape(w, 20,20),x)
+# const jcfg  = Diff.JacobianConfig(model, x)
+function get_loss(w,x)
+    modelw(w)    = [f(w,x) for x = x]
+    function loss(w)
+        modelx(x::AbstractVector)    = f(w,x)
+        jacobian(x) = Diff.jacobian(modelx, x)
+        # @assert jacobian(x) == w
+        # sum(sum(modelw(w))) + sum(sum(jacobian(xi) for xi in x))
+        sum(sum(modelw(w))) + sum(sum(jacobian(x[:,i]) for i in 1:size(x,2)))
+        # sum(modelw(w)) + sum(jacobian(x))
     end
-    l
+    loss
 end
+loss = get_loss(w,x)
+grad(w) = Diff.gradient(loss,vec(w))
+grad(w)
 
-
-test(w1)
-gcfg = Diff.GradientConfig(test, w1)
-testgradient(w1) = Diff.gradient(test, w1, gcfg)
-testgradient(w1)
+@btime grad($w)
