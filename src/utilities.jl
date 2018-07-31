@@ -8,6 +8,7 @@ abstract type AbstractDiffSystem <: AbstractSys end
 abstract type AbstractVelSystem <: AbstractSys end
 
 import LTVModelsBase: simulate, predict
+import Flux.Tracker.data
 
 @with_kw struct System{T} <: AbstractSystem
     m::T
@@ -84,6 +85,68 @@ function VelSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
 end
 (m::VelSystem)(x) = m.m(x)
 
+# Non-flux systems =========================================================================
+tovec(w::Vector{<:Matrix}) = vcat([vec(w) for w in w]...)
+
+function pred(w,x,sizes)
+    state = copy(x)
+    for i=1:2:length(sizes)-2
+        state = tanh.(i2m(w,i,sizes)*state .+ i2m(w,i+1,sizes))
+    end
+    return i2m(w,length(sizes)-1,sizes)*state .+ i2m(w,length(sizes),sizes)
+end
+function predd(w,x,sizes,nx)
+    state = copy(x)
+    for i=1:2:length(sizes)-2
+        state = tanh.(i2m(w,i,sizes)*state .+ i2m(w,i+1,sizes))
+    end
+    return i2m(w,length(sizes)-1,sizes)*state .+ i2m(w,length(sizes),sizes) .+ x[1:nx,:]
+end
+pred(m,x) = pred(m.w,x,m.sizes)
+predd(m,x) = predd(m.w,x,m.sizes,m.nx)
+
+@with_kw struct ADSystem{JT} <: AbstractSystem
+    w::Vector{Float64}
+    sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
+    nx::Int
+    nu::Int
+    h::Float64 = 1.0
+    jacobian::JT
+end
+function ADSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
+    w = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
+    wd          = tovec(w)
+    model(x)    = pred(m,x)
+    jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
+    jacobian(x) = Diff.jacobian(model, x)
+    ADSystem(wd,sizes,nx,nu,h,jacobian)
+end
+(m::ADSystem)(x) = pred(m, x)
+(m::ADSystem)(w,x) = pred(w, x, m.sizes)
+
+@with_kw struct ADDiffSystem{JT} <: AbstractDiffSystem
+    w::Vector{Float64}
+    sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
+    nx::Int
+    nu::Int
+    h::Float64 = 1.0
+    jacobian::JT
+end
+function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
+    w = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
+    wd          = tovec(w)
+    model(x)    = predd(wd,x,sizes,nx)
+    jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
+    jacobian(x) = Diff.jacobian(model, x)
+    ADDiffSystem(wd,sizes,nx,nu,h,jacobian)
+end
+(m::ADDiffSystem)(x) = predd(m, x)
+(m::ADDiffSystem)(w,x) = predd(w, x, m.sizes, m.nx)
+
+Flux.testmode!(m::ADSystem) = nothing
+Flux.testmode!(m::ADDiffSystem) = nothing
 
 # Recurrent systems ========================================================================
 @with_kw struct RecurrentSystem{T} <: AbstractSystem
@@ -119,6 +182,38 @@ end
 
 loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 
+# cost(w,x,y)  = sum(abs2, pred(w,x,sizes) .- y)/size(y,2)
+cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2)
+# cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
+cost(w,sizes,nx,data) = cost(w,sizes,nx, data...)
+
+function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+    chunk = Diff.Chunk(x[:,1])
+    model, λ = mt.model, mt.λ
+    w, sizes, nx, nu = model.w, model.sizes, model.nx, model.nu
+    function lf(w)
+        # println("Entering loss function, typeof(w):", typeof(w))
+        f(x) = predd(w,x,sizes,nx)
+        jcfg        = Diff.JacobianConfig(f, x[:,1], chunk)
+        jacobian(x) = Diff.jacobian(f, x, jcfg)
+        l = cost(w,sizes,nx,x,y)
+        J2 = zeros(nx+nu, nx)
+        J1 = jacobian(x[:,1])
+        for t = 2:size(x,2)
+            J2 = jacobian(x[:,t])
+            l += λ*sum(abs2.(J1.-J2))
+            J1 = J2
+        end
+        l
+    end
+end
+
+function i2m(w,i,sizes)
+    s = [1; cumsum([prod.(sizes)...]) .+ 1]
+    reshape(view(w,s[i]:(s[i+1]-1)), sizes[i])
+end
+
+
 const AbstractEnsembleSystem = Vector{T} where T <: AbstractSys
 const EnsembleSystem = Vector{T} where T <: AbstractSystem
 const EnsembleDiffSystem = Vector{T} where T <: AbstractDiffSystem
@@ -139,7 +234,7 @@ function simulate(ms::AbstractEnsembleSystem,x::AbstractArray, testmode=true)
     ns = ms[1].nx
     for t = 2:size(x,2)
         @ensemble xsimt = ms(xsim[:,t-1])
-        xsim[1:ns,t] = mean(xsimt).data
+        xsim[1:ns,t] = data(mean(xsimt))
     end
     xsim[1:ns,:]
 end
@@ -151,7 +246,7 @@ function simulate(ms::EnsembleVelSystem,x::AbstractArray, testmode=true)
         @ensemble xsimt = ms(xsim[:,t-1])
         h = ms[1].h
         xsim[1:2,t] = xsim[1:2,t-1] + h*xsim[3:4,t-1] # TODO magic numbers
-        xsim[3:4,t] = mean(xsimt).data # TODO magic numbers
+        xsim[3:4,t] = data(mean(xsimt)) # TODO magic numbers
     end
     xsim[1:4,:]
 end
@@ -161,16 +256,16 @@ simulate(ms, t::Trajectory; kwargs...) = simulate(ms, t.xu; kwargs...)
 function predict(ms::AbstractEnsembleSystem, x::AbstractMatrix, testmode=true)
     Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
-    mean(y).data, getfield.(extrema(y), :data)
+    data(mean(y)), data.(extrema(y))
 end
 
 function predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
-    yh = mean(y).data
+    yh = data(mean(y))
     h = ms[1].h
     yh = [x[1:2,1] .+ h*cumsum(yh,2); yh] # TODO magic numbers
-    bounds = getfield.(extrema(y), :data)
+    bounds = data.(extrema(y))
     yh, bounds
 end
 
@@ -194,9 +289,14 @@ function Flux.jacobian(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     squeeze(mean(jacmat, 3), 3), squeeze(std(jacmat, 3), 3)
 end
 
+function Flux.jacobian(m::Union{ADSystem,ADDiffSystem}, x)
+    m.jacobian(x), nothing
+end
+
+
 Flux.jacobian(ms, t::Trajectory; kwargs...) = Flux.jacobian(ms, t.xu; kwargs...)
 
-models(mt::ModelTrainer) = getfield.(mt.models, :m)
+models(mt::AbstractModelTrainer) = getfield.(mt.models, :m)
 models(systems::Vector{<:AbstractSys}) = getfield.(systems, :m)
 models(results::AbstractVector) = [r[:m] for r in results]
 models(results::Associative) = [r[:m]]
@@ -227,6 +327,7 @@ function jacobians(ms, t, ds=1)
     Js = smartcat2(getindex.(J,2))
     Jm, Js
 end
+
 
 function eval_pred(results, eval=false)
     @unpack x,u,y,modeltype = results[1]
@@ -265,7 +366,7 @@ end
 get_res(res,n) = getindex.(res,n)
 
 try
-foreach(treelike, [System, DiffSystem, StabilizedDiffSystem, NominalDiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem])
+    foreach(treelike, [System, DiffSystem, StabilizedDiffSystem, NominalDiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem])
 end
 
 function smartcat2(vv)
