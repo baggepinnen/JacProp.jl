@@ -1,17 +1,18 @@
 module JacProp
 
-export Trajectory, default_activations, ModelTrainer, sample_jacprop, push!, train!, display_modeltrainer, getter
+export Trajectory, default_activations, ModelTrainer, ADModelTrainer, sample_jacprop, push!, train!, display_modeltrainer, getter
 
 using LTVModelsBase, Parameters, Reexport, Lazy, Juno, FunctionEnsembles
 @reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils
 using Flux: back!, truncate!, treelike, train!, mse, testmode!, params, jacobian, throttle
 using Flux.Optimise: Param, optimiser, RMSProp, expdecay
-
-using Plots, InteractNext, Observables, DataStructures
-
+using Plots, DataStructures, ForwardDiff, ReverseDiff#, InteractNext, Observables
+const Diff = ForwardDiff
+const RDiff = ReverseDiff
 const default_activations = [swish, Flux.sigmoid, tanh, elu]
 const IT = IterTools
 
+abstract type AbstractModelTrainer end
 
 
 """
@@ -28,7 +29,7 @@ ModelTrainer
 
 See also [`LTVModels`](@ref),  [`LTVModels.KalmanModel`](@ref)
 """
-@with_kw mutable struct ModelTrainer{cbT,tT}
+@with_kw mutable struct ModelTrainer{cbT,tT} <: AbstractModelTrainer
     models
     opts
     losses
@@ -39,6 +40,16 @@ See also [`LTVModels`](@ref),  [`LTVModels.KalmanModel`](@ref)
     P::Float64        = 1.0
     trajs::Vector{Trajectory} = Trajectory[]
     cb::cbT
+    modelhistory = []
+    trace::tT = History(Float64)
+end
+
+@with_kw mutable struct ADModelTrainer{mT,tT} <: AbstractModelTrainer
+    model::mT
+    opt
+    λ::Float64 = 1.
+    testdata::Trajectory
+    trajs::Vector{Trajectory} = Trajectory[]
     modelhistory = []
     trace::tT = History(Float64)
 end
@@ -72,6 +83,46 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=0, useprior=true, trace
     end
     push!(mt.modelhistory, deepcopy(models))
     trace
+end
+
+function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace)
+    @assert !isempty(mt.trajs) "No data in ModelTrainer"
+    @unpack model,opt,testdata,λ = mt
+    if epochs <= 0
+        push!(mt.modelhistory, deepcopy(model))
+        return
+    end
+    w           = model.w
+    data        = todata2(mt)
+    datat       = todata2([testdata])
+    x,y         = data
+    lossfun     = loss(w,x,y,mt)
+    gcfg        = RDiff.GradientConfig(w)
+    print("Compiling tape")
+    @time tape  = RDiff.GradientTape(lossfun, w, gcfg) |> RDiff.compile
+    println(" Done")
+    trace       = History(Float64)
+    tracev      = History(Float64)
+    push!(trace, 0, lossfun(w))
+    push!(tracev, 0, cost(w,model.sizes,model.nx,datat))
+    g = similar(w)
+    epochs > 0 && plot(reuse=false)
+    startepoch = length(mt.trace)+1
+    @progress for epoch = startepoch:startepoch+epochs-1
+        lossfun = loss(w,x,y,mt)
+        RDiff.gradient!(g,tape,w)
+        opt(g, epoch)
+        if epoch % 10 == 0
+            push!(trace, epoch, lossfun(w))
+            push!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
+            plot(trace, reuse=true)
+            plot!(tracev)
+            gui()
+            println("Losses: ", last(trace), last(tracev)[2])
+        end
+    end
+    push!(mt.modelhistory, deepcopy(model))
+    trace, tracev
 end
 
 function fit_models(mt::ModelTrainer, useprior)
@@ -111,21 +162,26 @@ function LTVModels.KalmanModel(mt::ModelTrainer, t::Trajectory, ms=mt.models;
 end
 
 todata(trajs::Vector{Trajectory}) = [(traj.xu,traj.y) for traj in trajs]
-todata(mt::ModelTrainer) = todata(mt.trajs)
-
-Base.push!(mt::ModelTrainer, t::Trajectory) = push!(mt.trajs, t)
-Base.push!(mt::ModelTrainer, data::Matrix...) = push!(mt.trajs, Trajectory(data...))
-
-(mt::ModelTrainer)(; kwargs...) = train!(mt; kwargs...)
-
-function (mt::ModelTrainer)(t::Trajectory; kwargs...)
-    push!(mt,t)
-    train!(mt; kwargs...)
+todata(mt::AbstractModelTrainer) = todata(mt.trajs)
+function todata2(trajs::Vector{Trajectory})
+    xu = hcat(getfield.(trajs,:xu)...)
+    y = hcat(getfield.(trajs,:y)...)
+    xu, y
 end
+todata2(mt::AbstractModelTrainer) = todata2(mt.trajs)
 
-(mt::ModelTrainer)(data::Matrix...; kwargs...) = mt(Trajectory(data...); kwargs...)
+Base.push!(mt::AbstractModelTrainer, t::Trajectory) = push!(mt.trajs, t)
+Base.push!(mt::AbstractModelTrainer, data::Matrix...) = push!(mt.trajs, Trajectory(data...))
 
-Lazy.@forward ModelTrainer.models predict, simulate, Flux.jacobian, eigvalplot, jacplot
+for T in (ModelTrainer, ADModelTrainer)
+    @eval (mt::($T))(; kwargs...) = train!(mt; kwargs...)
+    @eval function (mt::($T))(t::Trajectory; kwargs...)
+        push!(mt,t)
+        train!(mt; kwargs...)
+    end
+    @eval (mt::($T))(data::Matrix...; kwargs...) = mt(Trajectory(data...); kwargs...)
+    @eval Lazy.@forward ($T).models predict, simulate, Flux.jacobian, eigvalplot, jacplot
+end
 
 include("plots.jl")
 

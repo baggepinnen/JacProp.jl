@@ -87,40 +87,40 @@ eigvalplot
     nothing
 end
 
-function display_modeltrainer(mt::ModelTrainer; kwargs...)
-    ms = mt.models
-    modeldict = OrderedDict("All models" => 0,
-                ["Model "*string(i) => i for i = 1:length(mt.models)]...)
-
-    hist = length(mt.modelhistory)
-    ui = @manipulate for  t  = togglebuttons(1:length(mt.trajs), selected=1),
-                          mn = togglebuttons(modeldict, selected=1),
-                          modelversion = slider(1:hist,  value=hist, label="Model state"),
-                          f       = slider(1:100, label="Filtering", value=0),
-                          ds      = slider(1:100, value=4, label="Downsampling"),
-                          eigvals = [true,false],
-                          cont    = [true,false],
-                          trajplot = togglebuttons(OrderedDict( "Prediction"=>1,
-                                                                "Simulation"=>2,
-                                                                "LTV pred"=>3,
-                                                                "LTV sim"=>4),
-                                                                multiselect=true)
-
-        ms        = mt.modelhistory[modelversion]
-        modelinds = (mn <= 0 || mn > length(ms)) ? (1:length(ms)) : (mn:mn)
-        ms = ms[modelinds]
-        if eigvals
-            eigvalplot(ms, mt.trajs[t]; ds=ds, cont=cont, kwargs...)
-        else
-            fig = plot(mt.trajs[t]; filtering=f, lab="True", kwargs...)
-            1 ∈ trajplot && predplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
-            2 ∈ trajplot && simplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
-            3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
-            4 ∈ trajplot && simplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
-            fig
-        end
-    end
-end
+# function display_modeltrainer(mt::ModelTrainer; kwargs...)
+#     ms = mt.models
+#     modeldict = OrderedDict("All models" => 0,
+#                 ["Model "*string(i) => i for i = 1:length(mt.models)]...)
+#
+#     hist = length(mt.modelhistory)
+#     ui = @manipulate for  t  = togglebuttons(1:length(mt.trajs), selected=1),
+#                           mn = togglebuttons(modeldict, selected=1),
+#                           modelversion = slider(1:hist,  value=hist, label="Model state"),
+#                           f       = slider(1:100, label="Filtering", value=0),
+#                           ds      = slider(1:100, value=4, label="Downsampling"),
+#                           eigvals = [true,false],
+#                           cont    = [true,false],
+#                           trajplot = togglebuttons(OrderedDict( "Prediction"=>1,
+#                                                                 "Simulation"=>2,
+#                                                                 "LTV pred"=>3,
+#                                                                 "LTV sim"=>4),
+#                                                                 multiselect=true)
+#
+#         ms        = mt.modelhistory[modelversion]
+#         modelinds = (mn <= 0 || mn > length(ms)) ? (1:length(ms)) : (mn:mn)
+#         ms = ms[modelinds]
+#         if eigvals
+#             eigvalplot(ms, mt.trajs[t]; ds=ds, cont=cont, kwargs...)
+#         else
+#             fig = plot(mt.trajs[t]; filtering=f, lab="True", kwargs...)
+#             1 ∈ trajplot && predplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+#             2 ∈ trajplot && simplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+#             3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+#             4 ∈ trajplot && simplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+#             fig
+#         end
+#     end
+# end
 
 
 @userplot PredPlot

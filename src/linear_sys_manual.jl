@@ -2,7 +2,7 @@
 default(grid=false) #src
 plot(randn(10))
 # closeall();gui()
-using Parameters, ForwardDiff, ReverseDiff, LTVModelsBase, ValueHistories, JLD
+using Parameters, ForwardDiff, ReverseDiff, LTVModelsBase, ValueHistories, JLD#, JacProp
 const Diff = ForwardDiff
 const RDiff = ReverseDiff
 @with_kw struct LinearSys
@@ -131,7 +131,7 @@ function runtrain(w, loss; epochs = 500)
     x,y         = dtrn
     lossfun     = loss(w,x,y)
     gcfg        = RDiff.GradientConfig(w)
-    tape        = RDiff.GradientTape(lossfun, w, gcfg) |> RDiff.compile
+    @time tape  = RDiff.compile(RDiff.GradientTape(lossfun, w, gcfg))
     # gradient(w) = Diff.gradient(lossfun, w, gcfg)
     trace       = History(Float64)
     tracev      = History(Float64)
@@ -144,15 +144,17 @@ function runtrain(w, loss; epochs = 500)
         lossfun     = loss(w,x,y)
         # gcfg        = Diff.GradientConfig(lossfun, w)
         # gradient(w) = RDiff.gradient!(g,tape, w)
-        RDiff.gradient!(g,tape,w)
         # RDiff.gradient!(g, lossfun, w, gcfg)
-        @. m = 0.002g + 0.85m
+        γ = 0.85
+        RDiff.gradient!(g,tape,w.-γ.*m)
+        @. m = 0.002g + γ*m
         @. w -= m
-        if epoch % 5 == 0
+        if epoch % 10 == 0
             push!(trace, epoch, lossfun(w))
             push!(tracev, epoch, cost(w,dtst))
             plot(trace, reuse=true)
             plot!(tracev)
+            gui()
             println(last(trace), last(tracev))
         end
     end
@@ -167,12 +169,11 @@ w1 = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,size
 w1 = tovec(w1)
 w2 = deepcopy(w1)
 
-res = runtrain(w1, (w,x,y)-> (w-> cost(w,x,y)), epochs=300)
+# res = runtrain(w1, (w,x,y)-> (w-> cost(w,x,y)), epochs=300)
 resj = runtrain(w2, loss, epochs=1000)
 # @save "res1.jld" res w1
-@save "resj2.jld" resj w2
+# @save "resj.jld" resj w2
 ##
-
 
 # Eval jac
 model(x)    = pred(w2,x,sizes)
@@ -181,9 +182,16 @@ jacobian(x) = Diff.jacobian(model, x, jcfg)
 jacs = vcat([eigvals(jacobian(vt.xu[:,i])[1:nx,1:nx]) for i = 1:length(vt)]...)
 scatter(real.(jacs), imag.(jacs))
 scatter!(real.(eigvals(sys.A)), imag.(eigvals(sys.A)))
+phi = linspace(-π/5,π/5,200)
+plot!(real.(exp.(phi.*im)), imag.(exp.(phi.*im)), l=(:dash, :black), yaxis=[-0.5,0.5], xaxis=[0,1.2])
 
 
-
+@load "resj.jld"
+model(x)    = pred(w2,x,sizes)
+jfg         = ForwardDiff.JacobianConfig(model, zeros(nx+nu))
+jacobian(x) = ForwardDiff.jacobian(model, x)
+m = JacProp.ADDiffSystem(w2,sizes,nx,nu, 1, jacobian)
+JacProp.eigvalplot(m,vt, true_jacobian)
 
 # Simple test
 using BenchmarkTools
