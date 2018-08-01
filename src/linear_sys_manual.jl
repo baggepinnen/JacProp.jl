@@ -54,7 +54,7 @@ end
 num_params = 30
 wdecay     = 0
 stepsize   = 0.02
-const sys  = LinearSys(1, nx=5, N=200, h=0.02, σ0 = 0.01)
+const sys  = LinearSys(1, nx=5, N=100, h=0.02, σ0 = 0.01)
 true_jacobian(x,u) = true_jacobian(sys,x,u)
 nu         = sys.nu
 nx         = sys.nx
@@ -112,7 +112,6 @@ function loss(w,x,y)
         jcfg        = Diff.JacobianConfig(model, x[:,1], chunk)
         jacobian(x) = Diff.jacobian(model, x, jcfg)
         l = cost(w,x,y)
-        J2 = zeros(nx+nu, nx)
         J1 = jacobian(x[:,1])
         for t = 2:size(x,2)
             J2 = jacobian(x[:,t])

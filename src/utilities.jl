@@ -187,21 +187,23 @@ cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2)
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
 cost(w,sizes,nx,data) = cost(w,sizes,nx, data...)
 
+# WARNING: don't assign to any vector with .= in the inner loss function closure
 function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     chunk = Diff.Chunk(x[:,1])
     model, λ = mt.model, mt.λ
-    w, sizes, nx, nu = model.w, model.sizes, model.nx, model.nu
+    sizes, nx, nu = model.sizes, model.nx, model.nu
     function lf(w)
         # println("Entering loss function, typeof(w):", typeof(w))
-        f(x) = predd(w,x,sizes,nx)
-        jcfg        = Diff.JacobianConfig(f, x[:,1], chunk)
+        f(x)          = predd(w,x,sizes,nx)
+        jcfg          = Diff.JacobianConfig(f, x[:,1], chunk)
+        l             = cost(w,sizes,nx,x,y)
         jacobian(x) = Diff.jacobian(f, x, jcfg)
-        l = cost(w,sizes,nx,x,y)
-        J2 = zeros(nx+nu, nx)
         J1 = jacobian(x[:,1])
         for t = 2:size(x,2)
             J2 = jacobian(x[:,t])
-            l += λ*sum(abs2.(J1.-J2))
+            d = J1.-J2
+            l += λ*sum(abs2, d)
+            # copy!(J1,J2)
             J1 = J2
         end
         l

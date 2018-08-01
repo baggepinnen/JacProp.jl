@@ -52,6 +52,7 @@ end
     trajs::Vector{Trajectory} = Trajectory[]
     modelhistory = []
     trace::tT = History(Float64)
+    tracev::tT = History(Float64)
 end
 
 
@@ -87,7 +88,7 @@ end
 
 function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace)
     @assert !isempty(mt.trajs) "No data in ModelTrainer"
-    @unpack model,opt,testdata,λ = mt
+    @unpack model,opt,testdata,λ,trace,tracev = mt
     if epochs <= 0
         push!(mt.modelhistory, deepcopy(model))
         return
@@ -98,21 +99,20 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace)
     x,y        = data
     lossfun    = loss(w,x,y,mt)
     gcfg       = RDiff.GradientConfig(w)
-    print("Compiling tape")
+    gc()
+    print("Compiling tape ")
     @time tape = RDiff.GradientTape(lossfun, w, gcfg) |> RDiff.compile
     println(" Done")
-    trace      = History(Float64)
-    tracev     = History(Float64)
     push!(trace, 0, lossfun(w))
     push!(tracev, 0, cost(w,model.sizes,model.nx,datat))
     g          = similar(w)
     epochs > 0 && plot(reuse=false)
-    startepoch = length(mt.trace)+1
+    startepoch = length(trace)+1
     @progress for epoch = startepoch:startepoch+epochs-1
-        lossfun = loss(w,x,y,mt)
+        # lossfun = loss(w,x,y,mt)
         RDiff.gradient!(g,tape,w)
         opt(g, epoch)
-        if epoch % 10 == 0
+        if epoch % 5 == 0
             push!(trace, epoch, lossfun(w))
             push!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
             plot(trace, reuse=true)
