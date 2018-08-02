@@ -145,8 +145,8 @@ end
 (m::ADDiffSystem)(x) = predd(m, x)
 (m::ADDiffSystem)(w,x) = predd(w, x, m.sizes, m.nx)
 
-Flux.testmode!(m::ADSystem) = nothing
-Flux.testmode!(m::ADDiffSystem) = nothing
+Flux.testmode!(m::ADSystem, b=false) = nothing
+Flux.testmode!(m::ADDiffSystem, b=false) = nothing
 
 # Recurrent systems ========================================================================
 @with_kw struct RecurrentSystem{T} <: AbstractSystem
@@ -230,21 +230,32 @@ function get_minimum_loss(results, key)
     return isempty(array) ? Inf : minimum(array)
 end
 
-function simulate(ms::AbstractEnsembleSystem,x::AbstractArray, testmode=true)
+function simulate(ms::AbstractEnsembleSystem,xu::AbstractMatrix, testmode=true)
     Flux.testmode!.(ms, testmode)
-    xsim = copy(x)
-    ns = ms[1].nx
-    for t = 2:size(x,2)
+    xsim = copy(xu)
+    nx = _nx(ms)
+    for t = 2:size(xu,2)
         @ensemble xsimt = ms(xsim[:,t-1])
-        xsim[1:ns,t] = data(mean(xsimt))
+        xsim[1:nx,t] = data(mean(xsimt))
     end
-    xsim[1:ns,:]
+    xsim[1:nx,:]
 end
 
-function simulate(ms::EnsembleVelSystem,x::AbstractArray, testmode=true)
+function simulate(ms::AbstractSys,xu::AbstractMatrix, testmode=true)
+    ms isa ADDiffSystem || Flux.testmode!.(ms, testmode)
+    xsim = copy(xu)
+    nx = _nx(ms)
+    for t = 2:size(xu,2)
+        xsimt = ms(xsim[:,t-1])
+        xsim[1:nx,t] = xsimt
+    end
+    xsim[1:nx,:]
+end
+
+function simulate(ms::EnsembleVelSystem,xu::AbstractMatrix, testmode=true)
     Flux.testmode!.(ms, testmode)
-    xsim = copy(x)
-    for t = 2:size(x,2)
+    xsim = copy(xu)
+    for t = 2:size(xu,2)
         @ensemble xsimt = ms(xsim[:,t-1])
         h = ms[1].h
         xsim[1:2,t] = xsim[1:2,t-1] + h*xsim[3:4,t-1] # TODO magic numbers
@@ -253,14 +264,15 @@ function simulate(ms::EnsembleVelSystem,x::AbstractArray, testmode=true)
     xsim[1:4,:]
 end
 
-simulate(ms, t::Trajectory; kwargs...) = simulate(ms, t.xu; kwargs...)
+simulate(ms::Union{AbstractSys,AbstractEnsembleSystem}, t::Trajectory; kwargs...) = simulate(ms, t.xu; kwargs...)
 
-function predict(ms::AbstractEnsembleSystem, x::AbstractMatrix, testmode=true)
+function predict(ms::Vector, x::AbstractMatrix, testmode=true)
     Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
     data(mean(y)), data.(extrema(y))
 end
 
+predict(ms, x::AbstractMatrix, testmode=true) = ms(x), nothing
 function predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
@@ -271,7 +283,7 @@ function predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     yh, bounds
 end
 
-predict(ms, t::Trajectory; kwargs...) = predict(ms, t.xu; kwargs...)
+predict(ms::Union{AbstractSys,AbstractEnsembleSystem}, t::Trajectory; kwargs...) = predict(ms, t.xu; kwargs...)
 
 function Flux.jacobian(ms::AbstractEnsembleSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
@@ -298,10 +310,15 @@ end
 
 Flux.jacobian(ms, t::Trajectory; kwargs...) = Flux.jacobian(ms, t.xu; kwargs...)
 
-models(mt::AbstractModelTrainer) = getfield.(mt.models, :m)
+models(mt::ModelTrainer) = mt.models
+models(mt::ADModelTrainer) = mt.model
 models(systems::Vector{<:AbstractSys}) = getfield.(systems, :m)
 models(results::AbstractVector) = [r[:m] for r in results]
 models(results::Associative) = [r[:m]]
+_nx(s::AbstractSys) = s.nx
+_nx(v::AbstractVector) = _nx(v[1])
+_nx(trainer::ModelTrainer) = _nx(trainer.models)
+_nx(trainer::ADModelTrainer) = _nx(trainer.model)
 
 function LTVModels.KalmanModel(ms::AbstractEnsembleSystem, t::Trajectory)
     xu = t.xu
@@ -331,31 +348,32 @@ function jacobians(ms, t, ds=1)
 end
 
 
-function eval_pred(results, eval=false)
-    @unpack x,u,y,modeltype = results[1]
-    ms = models(results)
-    nx = ms[1].nx
-    yh, bounds = predict(ms, x)
-    pred = rms(x[1:nx,2:end].-yh[:,1:end-1]) # TODO: check time alignment
+function eval_pred(trainer::AbstractModelTrainer, vt)
+    @unpack x,u,y = vt
+    ms = models(trainer)
+    nx = _nx(trainer)
+    yh, bounds = predict(ms, vt.xu)
+    pred = LTVModelsBase.rms(x[:,2:end].-yh[:,1:end-1]) # TODO: check time alignment
     pred
 end
 
-function eval_sim(results, eval=false)
-    @unpack x,u,y,modeltype = results[1]
-    ms = models(results)
-    nx = ms[1].nx
-    xh = simulate(ms, x)
-    sim = rms(x[1:nx,:].-xh) # TODO: check time alignment
+function eval_sim(trainer::AbstractModelTrainer, vt)
+    @unpack x,u,y,xu = vt
+    ms = models(trainer)
+    nx = _nx(trainer)
+    xh = simulate(ms, xu)
+    sim = LTVModelsBase.rms(x[:,:].-xh) # TODO: check time alignment
     sim
 end
 
-function eval_jac(Jm, Jtrue)
-    sqrt(mean(abs2, Jm .- Jtrue))
+function eval_jac(trainer::AbstractModelTrainer, vt, truejacfun, ds=1)
+    m = models(trainer)
+    mean(i-> mean(abs2.(jacobian(m,vt.xu[:,i])[1] .- truejacfun(vt.x[:,i],vt.u[:,i]))), 1:ds:length(vt)) |> √
 end
 
-function plotresults(results, eval=false)
-    @unpack x,u,y,modeltype = results[1]
-    ms = models(results)
+function plotresults(trainer::AbstractModelTrainer, vt)
+    @unpack x,u,y = vt
+    ms = models(trainer)
     nx = ms[1].nx
     fig = plot(x[1:nx,2:end]', lab="True", layout=nx)
     testmode!.(ms, true)

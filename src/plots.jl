@@ -72,7 +72,7 @@ eigvalplot
 
     end
     delete!(plotattributes, :ds)
-    phi = linspace(0,2π,300)
+    phi = linspace(-π/4,π/4,150)
     seriestype := :path
     if !cont
         ratio --> :equal
@@ -132,13 +132,13 @@ PredPlot
     ms = h.args[1]
     t = h.args[2]
     lab --> "Prediction"
-    Flux.reset!.(getfield.(ms, :m))
-    if ms isa Vector
-        r = filt(ones(filtering),[filtering], predict(ms,t)[1]')
+    ms isa Vector && Flux.reset!.(getfield.(ms, :m))
+    if ms isa Vector || ms isa ADDiffSystem
+        r = filt(ones(filtering),[filtering], predict(ms,t.xu)[1]')
     else
         r = filt(ones(filtering),[filtering], LTVModelsBase.predict(ms,t)')
     end
-    Flux.reset!.(getfield.(ms, :m))
+    ms isa Vector && Flux.reset!.(getfield.(ms, :m))
     r
 end
 
@@ -152,9 +152,9 @@ SimPlot
     t = h.args[2]
     lab --> "Simulation"
     simfun = ms isa LTVModelsBase.AbstractModel ? LTVModelsBase.simulate : simulate
-    Flux.reset!.(getfield.(ms, :m))
+    ms isa Vector && Flux.reset!.(getfield.(ms, :m))
     r = filt(ones(filtering),[filtering], simfun(ms,t)')
-    Flux.reset!.(getfield.(ms, :m))
+    ms isa Vector && Flux.reset!.(getfield.(ms, :m))
     r
 end
 
@@ -171,17 +171,17 @@ predsimplot
         label --> "True"
         filt(ones(filtering),[filtering], t.x')
     end
-    Flux.reset!.(getfield.(ms, :m))
+    ms isa Vector && Flux.reset!.(getfield.(ms, :m))
     @series begin
         lab --> "Prediction"
         filt(ones(filtering),[filtering], predict(ms,t)[1]')
     end
-    Flux.reset!.(getfield.(ms, :m))
+    ms isa Vector && Flux.reset!.(getfield.(ms, :m))
     @series begin
         lab --> "Simulation"
         filt(ones(filtering),[filtering], simulate(ms,t)')
     end
-    Flux.reset!.(getfield.(ms, :m))
+    ms isa Vector && Flux.reset!.(getfield.(ms, :m))
     nothing
 end
 

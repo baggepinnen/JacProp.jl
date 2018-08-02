@@ -1,6 +1,7 @@
 # weave("linear_sys_tmp.jl", doctype="github", out_path="build")
 using Plots
 default(grid=false)
+cd(@__DIR__)
 using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
 using Flux: params, jacobian
 using Flux.Optimise: Param, optimiser, expdecay
@@ -88,8 +89,6 @@ vt = Trajectory(vx,vu,vy)
 #' Generate training trajectories
 trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 
-serializesave(filename, data) = open(f->serialize(f, data), filename, "w")
-Base.deserialize(filename) = open(f->deserialize(f), filename)
 
 
 
@@ -115,7 +114,7 @@ for i = 1:3
     trainerjn(trajs[i], epochs=0, jacprop=1, useprior=false)
 end
 trainerjn(epochs=1000, jacprop=1)
-serializesave("trainerjn", trainerjn)
+serialize("trainerjn", trainerjn)
 trainerjn = deserialize("trainerjn")
 
 #' ## With AD-jacprop
@@ -126,14 +125,14 @@ trainerad = ADModelTrainer(;model=model, opt=opt, λ=1, testdata = vt)
 for i = 1:3
     trainerad(trajs[i], epochs=0)
 end
-trainerad(epochs=200)
-serializesave("trainerad", trainerad)
+trainerad(epochs=500)
+# serializesave("trainerad", trainerad)
 # trainerad = deserialize("trainerad")
 
 #' ## Visualize result
 using Plots.PlotMeasures
 F = font(18, "times")
-fontopts = [(:xticks, 0:0.5:1), (:yticks, -0.3:0.3:0.3), (:xlims, (0,1.4)), (:ylims, (-0.5, 0.5)), (:grid, false), (:markeralpha, 0.2), (:ds, 1), (:markerstrokealpha, 0), (:titlefont, F), (:tickfont, F), (:xtickfont, F), (:ytickfont, F), (:guidefont, F), (:xguidefont, F), (:yguidefont, F)]
+fontopts = [(:xticks, 0:0.5:1), (:yticks, -0.3:0.3:0.3), (:xlims, (0,1.4)), (:ylims, (-0.5, 0.5)), (:grid, false), (:markeralpha, 0.2), (:ds, 5), (:markerstrokealpha, 0), (:titlefont, F), (:tickfont, F), (:xtickfont, F), (:ytickfont, F), (:guidefont, F), (:xguidefont, F), (:yguidefont, F)]
 
 # mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,2), reuse=false, useprior=false, showltv=false, legend=false, xaxis=(1:3), xaxis=(1:3))
 # mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop", subplot=2, link=:y, useprior=false, showltv=false, legend=false, xaxis=(1:3))
@@ -142,11 +141,12 @@ fontopts = [(:xticks, 0:0.5:1), (:yticks, -0.3:0.3:0.3), (:xlims, (0,1.4)), (:yl
 
 #' The top row shows the error (Frobenius norm) in the Jacbians for several points sampled randomly in the state space. The bottow row shows the training errors. The training errors are lower without jacprop, but he greater error in the Jacobians for the validation data indicates overfitting, which is prevented by jacprop.
 
-eigvalplot(trainer.models, vt, true_jacobian; title="Baseline", layout=(1,3), subplot=1, size=(920,380), fontopts...)
+eigvalplot(trainer.models, vt, true_jacobian; title="Baseline", layout=(1,3), subplot=1, size=(920,280), fontopts...)
 eigvalplot!(trainerjn.models, vt, true_jacobian;  title="Jacprop", subplot=2, fontopts...)
 eigvalplot!(trainerad.model, vt, true_jacobian;  title="AD Jacprop", subplot=3, fontopts...)
 gui()
 savefig("/local/home/fredrikb/papers/nn_prior/figs/jacpropeig2.pdf")
+# pdftopng -r 300 -aa yes jacpropeig2.pdf jacpropeig2.png
 #' # Weight decay
 #' ## Weight decay off
 srand(1)

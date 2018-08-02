@@ -94,31 +94,38 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace)
         return
     end
     w          = model.w
-    data       = todata2(mt)
-    datat      = todata2([testdata])
-    x,y        = data
-    lossfun    = loss(w,x,y,mt)
-    gcfg       = RDiff.GradientConfig(w)
-    gc()
-    print("Compiling tape ")
-    @time tape = RDiff.GradientTape(lossfun, w, gcfg) |> RDiff.compile
-    println(" Done")
-    push!(trace, 0, lossfun(w))
-    push!(tracev, 0, cost(w,model.sizes,model.nx,datat))
+    data       = todata(mt)
+    datat      = todata([testdata])
+    losses = map(data) do d
+        x,y        = d
+        lossfun    = loss(w,x,y,mt)
+        gcfg       = RDiff.GradientConfig(w)
+        gc()
+        print("Compiling tape ")
+        @time tape = RDiff.GradientTape(lossfun, w, gcfg) |> RDiff.compile
+        println(" Done")
+        increment!(trace, 1, lossfun(w))
+        increment!(tracev, 1, cost(w,model.sizes,model.nx,datat))
+        lossfun, tape
+    end
     g          = similar(w)
     epochs > 0 && plot(reuse=false)
-    startepoch = length(trace)+1
+    startepoch = last(trace)[1]+1
     @progress for epoch = startepoch:startepoch+epochs-1
         # lossfun = loss(w,x,y,mt)
-        RDiff.gradient!(g,tape,w)
-        opt(g, epoch)
-        if epoch % 5 == 0
-            push!(trace, epoch, lossfun(w))
-            push!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
-            plot(trace, reuse=true)
-            plot!(tracev)
-            gui()
-            println("Losses: ", last(trace), last(tracev)[2])
+        for (i,(lossfun,tape)) in enumerate(losses)
+            RDiff.gradient!(g,tape,w)
+            opt(g, epoch)
+            if epoch % 5 == 0
+                increment!(trace, epoch, lossfun(w))
+                increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
+                if i == length(losses) == myid() == 1
+                    plot(trace, reuse=true)
+                    plot!(tracev)
+                    gui()
+                    println("Losses: ", last(trace), last(tracev)[2])
+                end
+            end
         end
     end
     push!(mt.modelhistory, deepcopy(model))
