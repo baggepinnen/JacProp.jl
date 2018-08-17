@@ -79,7 +79,7 @@ isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/local/home/fred
 
 
     num_params = 40
-    wdecay     = 0
+    wdecay     = 0.1
     stepsize   = 0.01
     const sys  = PendcartSys(N=200, h=0.02, σ0 = 0.3)
     true_jacobian(x,u) = true_jacobian(sys,x,u)
@@ -118,23 +118,23 @@ res = map(1:num_montecarlo) do it
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
         trainerad = ADModelTrainer(;model=model, opt=opt, λ=0.01, testdata = vt)
-        for i = 1:3
+        for i = 1:2
             trainerad(trajs[i], epochs=0)
         end
-        trainerad(epochs=40)
+        trainerad(epochs=2000)
         trainerad
     end
     r1 = @spawn begin
         srand(it)
         # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
         models     = [DiffSystem(nx,nu,num_params, tanh)]
-        opts       = ADAM.(params.(models), stepsize, decay=0.0005)#;
+        opts       = [[ADAM.(params.(models), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
         trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = 20)
-        for i = 1:3
+        for i = 1:2
             trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
             # traceplot(trainer)
         end
-        trainer(epochs=100)
+        trainer(epochs=2000)
         trainer
     end
 
@@ -145,8 +145,8 @@ res = [(fetch.(rs)...) for rs in res]
 
 # serialize("results", res)
 # res = deserialize("results")
-eigvalplot(res[1][1].models, vt, true_jacobian;layout=2,subplot=1,cont=false,title="Standard", ylims=[-0.1,0.1], xlims=[0.5,1.1])
-eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", ylims=[-0.1,0.1], xlims=[0.5,1.1]);gui()
+eigvalplot(res[1][1].models, vt, true_jacobian;layout=2,subplot=1,cont=false,title="Standard", ylims=[-0.2,0.2], xlims=[0.5,1.1])
+eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", ylims=[-0.2,0.2], xlims=[0.5,1.1]);gui()
 plot(res[1][2].trace.iterations,[res[2].trace.values for res in res], c=:blue)
 plot!(res[1][2].trace.iterations,[res[2].tracev.values for res in res], c=:orange)
 plot!(res[1][1].trace.iterations,[res[1].trace.values for res in res]./4, c=:red, xscale=:log10, yscale=:log10, legend=false)
@@ -165,8 +165,8 @@ jac   = [JacProp.eval_jac.(resdiff, vt, true_jacobian,3) JacProp.eval_jac.(resad
 
 ##
 using StatPlots
-vio1 = boxplot(pred, lab=["Standard" "Jacobian propagation"], ylabel="Prediction RMS", reuse=false, yscale=:log10)
-vio2 = boxplot(sim, lab=["Standard" "Jacobian propagation"], ylabel="Simulation RMS", yscale=:log10)
+vio1 = boxplot(pred, lab=["Standard" "Jacobian propagation"], ylabel="Prediction RMS", reuse=false, yscale=:identity)
+vio2 = boxplot(sim, lab=["Standard" "Jacobian propagation"], ylabel="Simulation RMS", yscale=:identity)
 vio3 = boxplot(jac, lab=["Standard" "Jacobian propagation"], ylabel="Jacobian Error", yscale=:identity)
 plot(vio1,vio2,vio3,title=infostring); gui()
 ##

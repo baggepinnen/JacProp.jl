@@ -183,7 +183,7 @@ end
 loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 
 # cost(w,x,y)  = sum(abs2, pred(w,x,sizes) .- y)/size(y,2)
-cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2)
+cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2) + 0.01sum(vecnorm.(w))
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
 cost(w,sizes,nx,data) = cost(w,sizes,nx, data...)
 
