@@ -1,10 +1,11 @@
 # pyplot()
+using Plots
 default(grid=false) #src
 plot(randn(10))
 # closeall();gui()
-using Parameters, ForwardDiff, ReverseDiff, LTVModelsBase, ValueHistories, JLD#, JacProp
+using Parameters, LTVModelsBase, ValueHistories, DSP, ForwardDiff#, JLD, ReverseDiff#, JacProp
 const Diff = ForwardDiff
-const RDiff = ReverseDiff
+# const RDiff = ReverseDiff
 @with_kw struct LinearSys
     A
     B
@@ -31,7 +32,7 @@ end
 function generate_data(sys::LinearSys, seed, validation=false)
     Parameters.@unpack A,B,N, nx, nu, h, σ0 = sys
     srand(seed)
-    u      = filt(ones(5),[5], 10randn(N+2,nu))'
+    u      = DSP.filt(ones(5),[5], 10randn(N+2,nu))'
     t      = h:h:N*h+h
     x0     = randn(nx)
     x      = zeros(nx,N+1)
@@ -219,3 +220,13 @@ grad(w) = Diff.gradient(loss,vec(w))
 grad(w)
 
 @btime grad($w)
+
+
+# f(w,x) = NeuralNetwork(w,x)
+# function loss(w,x)
+#     ∇xf(x) = jacobian(x->f(w,x), x)
+#     w -> norm(∇xf(x))
+# end
+#
+# l = loss(w,x)
+# gradient(loss,w) # Good luch with this

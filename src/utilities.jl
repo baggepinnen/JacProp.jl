@@ -334,7 +334,7 @@ function LTVModels.KalmanModel(ms::AbstractEnsembleSystem, t::Trajectory)
 end
 
 
-function jacobians(ms, t, ds=1)
+function jacobians(ms::AbstractVector, t, ds=1)
     msc = deepcopy(ms) # Obs, this is to not fuck up the gradients of the model parameters ??
     xu = t.xu
     N = size(xu,2)
@@ -345,6 +345,17 @@ function jacobians(ms, t, ds=1)
     Jm = smartcat2(getindex.(J,1))
     Js = smartcat2(getindex.(J,2))
     Jm, Js
+end
+
+function jacobians(ms, t, ds=1)
+    xu = t.xu
+    N = size(xu,2)
+    J = map(1:ds:N) do evalpoint
+        Jm, Js = jacobian(ms, xu[:,evalpoint])
+        Jm[:]
+    end
+    Jm = smartcat2(J)
+    Jm, nothing
 end
 
 
@@ -370,6 +381,8 @@ function eval_jac(trainer::AbstractModelTrainer, vt, truejacfun, ds=1)
     m = models(trainer)
     mean(i-> mean(abs2.(jacobian(m,vt.xu[:,i])[1] .- truejacfun(vt.x[:,i],vt.u[:,i]))), 1:ds:length(vt)) |> √
 end
+
+
 
 function plotresults(trainer::AbstractModelTrainer, vt)
     @unpack x,u,y = vt
