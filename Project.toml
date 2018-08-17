@@ -1,3 +1,7 @@
+name = "JacProp"
+version = "0.0.0"
+author = ["Fredrik Bagge Carlson <baggepinnen@gmail.com>"]
+
 [deps]
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 FunctionEnsembles = "d0720a9b-0dfa-5cb0-9529-0dbaa1fcaac1"
