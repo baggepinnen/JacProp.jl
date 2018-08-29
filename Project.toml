@@ -1,6 +1,8 @@
 name = "JacProp"
 version = "0.0.0"
 author = ["Fredrik Bagge Carlson <baggepinnen@gmail.com>"]
+uuid = "c2e5db7b-ba35-5c58-a4dc-ed95e9f8f2aa"
+
 
 [deps]
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
