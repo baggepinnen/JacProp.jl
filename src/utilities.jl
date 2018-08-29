@@ -194,24 +194,37 @@ function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     sizes, nx, nu = model.sizes, model.nx, model.nu
     function lf(w)
         # println("Entering loss function, typeof(w):", typeof(w))
-        λ = mt.λ
+        @unpack λ,normalizer = mt
         f(x)          = predd(w,x,sizes,nx)
         jcfg          = Diff.JacobianConfig(f, x[:,1], chunk)
         l             = cost(w,sizes,nx,x,y)
         jacobian(x) = Diff.jacobian(f, x, jcfg)
         J1 = jacobian(x[:,1])
-        md = zeros(J1); sd = zeros(J1)
+        sd = zeros(J1)
         for t = 2:size(x,2)
             J2 = jacobian(x[:,t])
-            d = abs2.(J1.-J2)
-            sd .+= d
-            md .= max.(d, md)
+            sd .+= abs2.(J1.-J2)
             # copy!(J1,J2)
             J1 = J2
         end
-        l += λ*sum(sd./md)
+        l += λ*sum(sd./normalizer)
         l
     end
+end
+
+function find_normalizer(w,data,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+    x,y = data
+    model = mt.model
+    sizes, nx, nu = model.sizes, model.nx, model.nu
+    f(x)          = predd(w,x,sizes,nx)
+    jcfg          = Diff.JacobianConfig(f, x[:,1])
+    jacobian(x) = Diff.jacobian(f, x, jcfg)
+    mJ = zeros(nx,nx+nu)
+    for t = 1:size(x,2)
+        J = jacobian(x[:,t])
+        mJ .= max.(abs.(J), mJ)
+    end
+    mJ
 end
 
 function i2m(w,i,sizes)

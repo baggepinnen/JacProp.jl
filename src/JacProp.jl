@@ -53,6 +53,7 @@ end
     modelhistory = []
     trace::tT = History(Float64)
     tracev::tT = History(Float64)
+    normalizer::Matrix{Float64} = ones(1,1)
 end
 
 
@@ -89,7 +90,7 @@ end
 function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, cb=()->())
     @assert !isempty(mt.trajs) "No data in ModelTrainer"
     @unpack model,opt,testdata,λ,trace,tracev = mt
-    mt.λ = 0.
+    # mt.λ = 0.
     if epochs <= 0
         push!(mt.modelhistory, deepcopy(model))
         return
@@ -97,6 +98,7 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
     w          = model.w
     data       = todata(mt)
     datat      = todata([testdata])
+    mt.normalizer = ones(size(data[1][2], 1),size(data[1][1], 1))
     losses = map(data) do d
         x,y        = d
         lossfun    = loss(w,x,y,mt)
@@ -110,24 +112,25 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
         lossfun, tape
     end
     g          = similar(w)
-    epochs > 0 && plot(reuse=false)
+    # epochs > 0 && plot(reuse=false)
     startepoch = last(trace)[1]+1
     @progress for epoch = startepoch:startepoch+epochs-1
-        epoch == 500 && (mt.λ = λ)
+        # epoch == 500 && (mt.λ = λ)
         # lossfun = loss(w,x,y,mt)
         for (i,(lossfun,tape)) in enumerate(losses)
             RDiff.gradient!(g,tape,w)
             opt(g, epoch)
-            if epoch % 50 == 0
+            if epoch % 5 == 0
+                # mt.normalizer = find_normalizer(w,data[i],mt)
                 increment!(trace, epoch, lossfun(w))
                 increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
-                if i == length(losses) && myid() == 1
-                    cb(model)
-                    # plot(trace, reuse=true)
-                    # plot!(tracev)
-                    # gui()
-                    println("Losses: ", last(trace), last(tracev)[2])
-                end
+                # if i == length(losses) && myid() == 1
+                #     cb(model)
+                #     # plot(trace, reuse=true)
+                #     # plot!(tracev)
+                #     # gui()
+                #     println("Losses: ", last(trace), last(tracev)[2])
+                # end
             end
         end
     end

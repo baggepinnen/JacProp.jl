@@ -3,11 +3,11 @@ length(workers()) == 1 && @show addprocs(4)
 # TODO: scaled jacobian penalty
 # TODO: sample slower to move eigvals from 1
 # TODO: System instead of DiffSystem
-# TODO: Set λ = 0 for first fe whundred iterations
-# Increase λ from 0.1 to 1
+# DID set fixed normalizer updated every 50 steps
+
 # @everywhere using Revise
 using ParallelDataTransfer
-isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/local/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
+isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
 @everywhere using PendCart
 @everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
 @everywhere using Flux: params, jacobian
@@ -93,7 +93,7 @@ isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/local/home/fred
     num_params = 40
     wdecay     = 0.1
     stepsize   = 0.01
-    const sys  = PendcartSys(N=100, h=0.05, σ0 = 0.3)
+    const sys  = PendcartSys(N=200, h=0.01, σ0 = 0.3)
     true_jacobian(x,u)  = true_jacobian(sys,x,u)
     true_jacobianc(x,u) = true_jacobianc(sys,x,u)
     nu         = sys.nu
@@ -111,6 +111,7 @@ function valdata()
             push!(vx, x[:,j])
             push!(vy, x[:,j+1])
             push!(vu, u[:,j])
+            
         end
     end
     hcat(vx...),hcat(vu...),hcat(vy...)
@@ -123,19 +124,19 @@ trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 sendto(workers(), trajs=trajs, vt=vt)
 
 ## Monte-Carlo evaluation
-num_montecarlo = 2
+num_montecarlo = 1
 it = 1
 res = map(1:num_montecarlo) do it
     r2 = @spawn begin
         srand(it)
-        cb(model) = (jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
+        cb(model) = ()#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
-        trainerad = ADModelTrainer(;model=model, opt=opt, λ=1, testdata = vt)
+        trainerad = ADModelTrainer(;model=model, opt=opt, λ=0.1, testdata = vt)
         for i = 1:2
             trainerad(trajs[i], epochs=0)
         end
-        trainerad(epochs=1000,cb=cb)
+        train!(trainerad, epochs=1000,cb=cb)
         trainerad
     end
     r1 = @spawn begin
