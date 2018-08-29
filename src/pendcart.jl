@@ -1,5 +1,7 @@
 cd(@__DIR__)
 length(workers()) == 1 && @show addprocs(4)
+# TODO: scaled jacobian penalty
+# TODO: sample slower to move eigvals from 1
 
 # @everywhere using Revise
 using ParallelDataTransfer
@@ -53,7 +55,7 @@ isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/local/home/fred
             x,u
         end
 
-        function true_jacobian(sys::PendcartSys, x::AbstractVector, u::AbstractVector)
+        function true_jacobianc(sys::PendcartSys, x::AbstractVector, u::AbstractVector)
             u[isnan.(u)] = 0
             nx = size(x,1)
             nu = size(u,1)
@@ -64,7 +66,12 @@ isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/local/home/fred
             0 0 0 1;
             0 0 0 0]
             fu[:,:] = [0, cos(x[1])/l, 0, 1]
-            ABd = expm([fx[:,:]*h  fu[:,:]*h; zeros(nu, nx + nu)])[1:4,:]# ZoH sampling
+            [fx  fu]
+        end
+
+        function true_jacobian(sys::PendcartSys, x::AbstractVector, u::AbstractVector)
+            J = true_jacobianc(sys,x,u)
+            ABd = expm([J*sys.h; zeros(nu, nx + nu)])[1:4,:]# ZoH sampling
         end
     end
 
@@ -73,7 +80,10 @@ isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/local/home/fred
         function ()
             l = sum(d->Flux.data(loss(d...)),d)
             increment!(trace,epoch,l)
-            i % 500 == 0 && println(@sprintf("Loss: %.4f", l))
+            if i % 500 == 0
+                @printf("Loss: %.4f", l)
+                jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true)
+            end
         end
     end
 
@@ -81,8 +91,9 @@ isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/local/home/fred
     num_params = 40
     wdecay     = 0.1
     stepsize   = 0.01
-    const sys  = PendcartSys(N=200, h=0.02, σ0 = 0.3)
-    true_jacobian(x,u) = true_jacobian(sys,x,u)
+    const sys  = PendcartSys(N=100, h=0.05, σ0 = 0.3)
+    true_jacobian(x,u)  = true_jacobian(sys,x,u)
+    true_jacobianc(x,u) = true_jacobianc(sys,x,u)
     nu         = sys.nu
     nx         = sys.nx
 
@@ -110,18 +121,19 @@ trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 sendto(workers(), trajs=trajs, vt=vt)
 
 ## Monte-Carlo evaluation
-num_montecarlo = 4
+num_montecarlo = 2
 it = 1
 res = map(1:num_montecarlo) do it
     r2 = @spawn begin
         srand(it)
+        cb(model) = (jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
-        trainerad = ADModelTrainer(;model=model, opt=opt, λ=0.01, testdata = vt)
+        trainerad = ADModelTrainer(;model=model, opt=opt, λ=0.1, testdata = vt)
         for i = 1:2
             trainerad(trajs[i], epochs=0)
         end
-        trainerad(epochs=2000)
+        trainerad(epochs=500,cb=cb)
         trainerad
     end
     r1 = @spawn begin
@@ -134,7 +146,7 @@ res = map(1:num_montecarlo) do it
             trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
             # traceplot(trainer)
         end
-        trainer(epochs=2000)
+        trainer(epochs=500)
         trainer
     end
 
@@ -142,18 +154,18 @@ res = map(1:num_montecarlo) do it
     r1,r2
 end
 res = [(fetch.(rs)...) for rs in res]
+resdiff = getindex.(res,1)
+resad = getindex.(res,2)
 
 # serialize("results", res)
 # res = deserialize("results")
 eigvalplot(res[1][1].models, vt, true_jacobian;layout=2,subplot=1,cont=false,title="Standard", ylims=[-0.2,0.2], xlims=[0.5,1.1])
 eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", ylims=[-0.2,0.2], xlims=[0.5,1.1]);gui()
-plot(res[1][2].trace.iterations,[res[2].trace.values for res in res], c=:blue)
-plot!(res[1][2].trace.iterations,[res[2].tracev.values for res in res], c=:orange)
-plot!(res[1][1].trace.iterations,[res[1].trace.values for res in res]./4, c=:red, xscale=:log10, yscale=:log10, legend=false)
+plot(res[1][2].trace.iterations,[res.trace.values for res in resad], c=:blue)
+plot!(res[1][2].trace.iterations,[res.tracev.values for res in resad], c=:orange)
+plot!(res[1][1].trace.iterations,[res.trace.values for res in resdiff]./4, c=:red, xscale=:log10, yscale=:log10, legend=false)
 
 
-resdiff = getindex.(res,1)
-resad = getindex.(res,2)
 
 nr = length(res[1])÷2
 labelvec = ["f" "g"]
@@ -196,20 +208,63 @@ jacplot!(resad[1].model, trajs[1], ds=2); gui()
 
 
 
-
-
-
-
-
-let h = 0.01, g = 9.82, l = 0.35, d = 2
-    function fsys(xd,x,u)
-        xd[1] = x[2]
-        xd[2] = -g/l * sin(x[1]) + u[]/l * cos(x[1]) - d*x[2]
-        xd[3] = x[4]
-        xd[4] = u[]
-        xd
-    end
-    x0 = [0.9π,0,0,0]
-    @show fsys(similar(x0), x0, 0)
-
+num_montecarlo = 40
+it = 1
+res = pmap(1:num_montecarlo) do it
+        λ = logspace(-2,2,100)[rand(1:100)]
+        num_params = rand(10:100)
+        srand(it)
+        model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
+        opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
+        trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
+        for i = 1:2
+            trainerad(trajs[i], epochs=0)
+        end
+        trainerad(epochs=2000)
+        println(it)
+        trainerad
 end
+# serialize("res", res)
+
+res2 = map(res) do r
+    JacProp.eval_jac.(r, vt, true_jacobian,3)
+end
+im = indmin(res2)
+trainerad = res[im]
+s = map(res) do r
+    r.model.sizes[1][1]
+end
+λ = map(res) do r
+    r.λ
+end
+
+jacplot(trainerad.model, trajs[1], true_jacobian, ds=2, reuse=false)
+
+scatter([s λ], res2, layout=2)
+plot!(xscale=:log10, yscale=:log10, subplot=2)
+
+
+
+
+# Generate ss vs tf param plot ==========================================
+using ControlSystems
+t = Trajectory(generate_data(sys, 1)...)
+
+function jacs(t)
+    N = length(t)
+    J = map(1:N) do evalpoint
+        Jd = true_jacobian(t.x[:,evalpoint],t.u[:,evalpoint])
+        Jc = true_jacobianc(t.x[:,evalpoint],t.u[:,evalpoint])
+        Gss = c2d(ss(Jc[1:end,1:nx], Jc[1:end,nx+1:end],[1 0 0 0;0 0 1 0],0), sys.h)[1]
+        Gtf = tf(Gss)
+        # @show numpoly(Gtf)
+        hcat(getfield.(denpoly(Gtf),:a)...)
+        Jd[:], [hcat(getfield.(numpoly(Gtf),:a)...)' hcat(getfield.(denpoly(Gtf),:a)...)']
+    end
+    JacProp.smartcat2(getindex.(J, 1)), JacProp.smartcat3(getindex.(J, 2))
+end
+Gss, Gtf = jacs(t)
+Gtf = reshape(Gtf, 2*9,100)
+
+plot((Gss./maximum(abs.(Gss),2))', layout=2, subplot=1, c=:blue, legend=false)
+plot!((Gtf./maximum(abs.(Gtf),2))', subplot=2, c=:blue, legend=false)

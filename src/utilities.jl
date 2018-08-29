@@ -115,7 +115,7 @@ predd(m,x) = predd(m.w,x,m.sizes,m.nx)
 end
 function ADSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    w = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
+    w = [ Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) ]
     wd          = tovec(w)
     model(x)    = pred(m,x)
     jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
@@ -135,7 +135,7 @@ end
 end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    w = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
+    w = [ Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) ]
     wd          = tovec(w)
     model(x)    = predd(wd,x,sizes,nx)
     jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
@@ -183,7 +183,7 @@ end
 loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 
 # cost(w,x,y)  = sum(abs2, pred(w,x,sizes) .- y)/size(y,2)
-cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2) + 0.01sum(vecnorm.(w))
+cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2) #+ 0.01sum(vecnorm.(w))
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
 cost(w,sizes,nx,data) = cost(w,sizes,nx, data...)
 
@@ -199,13 +199,16 @@ function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
         l             = cost(w,sizes,nx,x,y)
         jacobian(x) = Diff.jacobian(f, x, jcfg)
         J1 = jacobian(x[:,1])
+        md = zeros(J1); sd = zeros(J1)
         for t = 2:size(x,2)
             J2 = jacobian(x[:,t])
-            d = J1.-J2
-            l += λ*sum(abs2, d)
+            d = abs2.(J1.-J2)
+            sd .+= d
+            md .= max.(d, md)
             # copy!(J1,J2)
             J1 = J2
         end
+        l += λ*sum(sd./md)
         l
     end
 end

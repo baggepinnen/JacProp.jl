@@ -86,7 +86,7 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=0, useprior=true, trace
     trace
 end
 
-function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace)
+function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, cb=()->())
     @assert !isempty(mt.trajs) "No data in ModelTrainer"
     @unpack model,opt,testdata,λ,trace,tracev = mt
     if epochs <= 0
@@ -116,13 +116,14 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace)
         for (i,(lossfun,tape)) in enumerate(losses)
             RDiff.gradient!(g,tape,w)
             opt(g, epoch)
-            if epoch % 5 == 0
+            if epoch % 50 == 0
                 increment!(trace, epoch, lossfun(w))
                 increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
-                if i == length(losses) == myid() == 1
-                    plot(trace, reuse=true)
-                    plot!(tracev)
-                    gui()
+                if i == length(losses) && myid() == 1
+                    cb(model)
+                    # plot(trace, reuse=true)
+                    # plot!(tracev)
+                    # gui()
                     println("Losses: ", last(trace), last(tracev)[2])
                 end
             end
