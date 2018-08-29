@@ -89,6 +89,7 @@ end
 function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, cb=()->())
     @assert !isempty(mt.trajs) "No data in ModelTrainer"
     @unpack model,opt,testdata,λ,trace,tracev = mt
+    mt.λ = 0.
     if epochs <= 0
         push!(mt.modelhistory, deepcopy(model))
         return
@@ -112,6 +113,7 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
     epochs > 0 && plot(reuse=false)
     startepoch = last(trace)[1]+1
     @progress for epoch = startepoch:startepoch+epochs-1
+        epoch == 500 && (mt.λ = λ)
         # lossfun = loss(w,x,y,mt)
         for (i,(lossfun,tape)) in enumerate(losses)
             RDiff.gradient!(g,tape,w)
