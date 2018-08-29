@@ -111,7 +111,7 @@ function valdata()
             push!(vx, x[:,j])
             push!(vy, x[:,j+1])
             push!(vu, u[:,j])
-            
+
         end
     end
     hcat(vx...),hcat(vu...),hcat(vy...)
@@ -124,7 +124,7 @@ trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 sendto(workers(), trajs=trajs, vt=vt)
 
 ## Monte-Carlo evaluation
-num_montecarlo = 1
+num_montecarlo = 2
 it = 1
 res = map(1:num_montecarlo) do it
     r2 = @spawn begin
@@ -136,7 +136,7 @@ res = map(1:num_montecarlo) do it
         for i = 1:2
             trainerad(trajs[i], epochs=0)
         end
-        train!(trainerad, epochs=1000,cb=cb)
+        train!(trainerad, epochs=2000,cb=cb)
         trainerad
     end
     r1 = @spawn begin
@@ -149,7 +149,7 @@ res = map(1:num_montecarlo) do it
             trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
             # traceplot(trainer)
         end
-        trainer(epochs=1000)
+        trainer(epochs=2000)
         trainer
     end
 

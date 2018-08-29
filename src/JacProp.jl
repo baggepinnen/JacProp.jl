@@ -122,8 +122,8 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
             opt(g, epoch)
             if epoch % 5 == 0
                 # mt.normalizer = find_normalizer(w,data[i],mt)
-                increment!(trace, epoch, lossfun(w))
-                increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
+                # increment!(trace, epoch, lossfun(w))
+                # increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
                 # if i == length(losses) && myid() == 1
                 #     cb(model)
                 #     # plot(trace, reuse=true)
