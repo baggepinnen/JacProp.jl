@@ -100,7 +100,7 @@ function predd(w,x,sizes,nx)
     for i=1:2:length(sizes)-2
         state = tanh.(i2m(w,i,sizes)*state .+ i2m(w,i+1,sizes))
     end
-    return i2m(w,length(sizes)-1,sizes)*state .+ i2m(w,length(sizes),sizes) .+ x[1:nx,:]
+    return i2m(w,length(sizes)-1,sizes)*state .+ i2m(w,length(sizes),sizes)# .+ x[1:nx,:]
 end
 pred(m,x) = pred(m.w,x,m.sizes)
 predd(m,x) = predd(m.w,x,m.sizes,m.nx)
@@ -115,7 +115,7 @@ predd(m,x) = predd(m.w,x,m.sizes,m.nx)
 end
 function ADSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    w = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
+    w = [ Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) ]
     wd          = tovec(w)
     model(x)    = pred(m,x)
     jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
@@ -135,7 +135,7 @@ end
 end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    w = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
+    w = [ Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) ]
     wd          = tovec(w)
     model(x)    = predd(wd,x,sizes,nx)
     jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
@@ -183,31 +183,48 @@ end
 loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 
 # cost(w,x,y)  = sum(abs2, pred(w,x,sizes) .- y)/size(y,2)
-cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2)
+cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2) #+ 0.01sum(vecnorm.(w))
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
 cost(w,sizes,nx,data) = cost(w,sizes,nx, data...)
 
 # WARNING: don't assign to any vector with .= in the inner loss function closure
 function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     chunk = Diff.Chunk(x[:,1])
-    model, λ = mt.model, mt.λ
+    model = mt.model
     sizes, nx, nu = model.sizes, model.nx, model.nu
     function lf(w)
         # println("Entering loss function, typeof(w):", typeof(w))
+        @unpack λ,normalizer = mt
         f(x)          = predd(w,x,sizes,nx)
         jcfg          = Diff.JacobianConfig(f, x[:,1], chunk)
         l             = cost(w,sizes,nx,x,y)
         jacobian(x) = Diff.jacobian(f, x, jcfg)
         J1 = jacobian(x[:,1])
+        sd = zeros(J1)
         for t = 2:size(x,2)
             J2 = jacobian(x[:,t])
-            d = J1.-J2
-            l += λ*sum(abs2, d)
+            sd .+= abs2.(J1.-J2)
             # copy!(J1,J2)
             J1 = J2
         end
+        l += λ*sum(sd./normalizer)
         l
     end
+end
+
+function find_normalizer(w,data,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+    x,y = data
+    model = mt.model
+    sizes, nx, nu = model.sizes, model.nx, model.nu
+    f(x)          = predd(w,x,sizes,nx)
+    jcfg          = Diff.JacobianConfig(f, x[:,1])
+    jacobian(x) = Diff.jacobian(f, x, jcfg)
+    mJ = zeros(nx,nx+nu)
+    for t = 1:size(x,2)
+        J = jacobian(x[:,t])
+        mJ .= max.(abs.(J), mJ)
+    end
+    mJ
 end
 
 function i2m(w,i,sizes)
@@ -334,7 +351,7 @@ function LTVModels.KalmanModel(ms::AbstractEnsembleSystem, t::Trajectory)
 end
 
 
-function jacobians(ms, t, ds=1)
+function jacobians(ms::AbstractVector, t, ds=1)
     msc = deepcopy(ms) # Obs, this is to not fuck up the gradients of the model parameters ??
     xu = t.xu
     N = size(xu,2)
@@ -345,6 +362,17 @@ function jacobians(ms, t, ds=1)
     Jm = smartcat2(getindex.(J,1))
     Js = smartcat2(getindex.(J,2))
     Jm, Js
+end
+
+function jacobians(ms, t, ds=1)
+    xu = t.xu
+    N = size(xu,2)
+    J = map(1:ds:N) do evalpoint
+        Jm, Js = jacobian(ms, xu[:,evalpoint])
+        Jm[:]
+    end
+    Jm = smartcat2(J)
+    Jm, nothing
 end
 
 
@@ -370,6 +398,8 @@ function eval_jac(trainer::AbstractModelTrainer, vt, truejacfun, ds=1)
     m = models(trainer)
     mean(i-> mean(abs2.(jacobian(m,vt.xu[:,i])[1] .- truejacfun(vt.x[:,i],vt.u[:,i]))), 1:ds:length(vt)) |> √
 end
+
+
 
 function plotresults(trainer::AbstractModelTrainer, vt)
     @unpack x,u,y = vt

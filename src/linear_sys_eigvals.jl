@@ -195,6 +195,7 @@ eigvalplot(trainers.models, vt, true_jacobian; title="\$f, \\lambda=0\$", layout
 eigvalplot!(trainerds.models, vt, true_jacobian;  title="\$g, \\lambda=0\$", subplot=2, fontopts...)
 eigvalplot!(trainerswd.models, vt, true_jacobian;  title="\$f, \\lambda=$wdecay\$", subplot=3, fontopts...)
 eigvalplot!(trainerdswd.models, vt, true_jacobian;  title="\$g, \\lambda=$wdecay\$", subplot=4, fontopts...)
+eigvalplot(trainers.models, vt, true_jacobian;  title="", axis=false, fontopts...)
 # plot!(link=:both)
 gui()
 # savefig("/local/home/fredrikb/papers/nn_prior/figs/all_zoom.pdf")

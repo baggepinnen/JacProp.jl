@@ -8,6 +8,7 @@ using ParallelDataTransfer
 @everywhere using Flux: params, jacobian
 @everywhere using Flux.Optimise: Param, optimiser, expdecay
 @everywhere begin
+    BLAS.set_num_threads(1)
     @with_kw struct TwoLinkSys
         N  = 1000
         nu  = 2
@@ -19,13 +20,16 @@ using ParallelDataTransfer
         s1ind = (nx+nu+1):(nx+nu+nx)
     end
 
-    function generate_data(sys::TwoLinkSys, seed, validation=false; ufun=u->filt(ones(100),[100], 10u')')
-        @unpack N, nu, nx, h, σ0, sind, uind, s1ind = sys
+    function generate_data(sys::TwoLinkSys, seed, validation=false; ufun=u->filt(ones(200),[200], 20u')')
+        @unpack N, nu, h, σ0 = sys
         srand(seed)
         done = false
         local x,u
         while !done
-            u    = ufun(randn(nu,N+2))
+            fs = logspace(-3,-1.5,50)[randperm(50)[1:5]]
+            # u    = ufun(randn(nu,N+2))
+            u = sum(f->sin.(2π*f.* (1:N+2)), fs)'
+            u = [u;reverse(u')']
             t    = 0:h:N*h
             x0   = [-0.4,0,0,0]
             prob = OrdinaryDiffEq.ODEProblem((x,p,t)->time_derivative(x, u[:,floor(Int,t/h)+1]),x0,(t[[1,end]]...))
@@ -41,8 +45,8 @@ using ParallelDataTransfer
     end
 
     function true_jacobian(sys::TwoLinkSys, x::AbstractVector, u::AbstractVector)
-        Jtrue = ReverseDiff.jacobian(x->time_derivative(x, u), x)[:,1:4]
-        Jtrue = [Jtrue ReverseDiff.jacobian(u->time_derivative(x, u), u)]
+        Jtrue = ForwardDiff.jacobian(x->time_derivative(x, u), x) # TODO: why the indexing
+        Jtrue = [Jtrue ForwardDiff.jacobian(u->time_derivative(x, u), u)]
         Jtrue = expm([sys.h*Jtrue;zeros(2,6)])[1:4,:] # Discretize
     end
 
@@ -56,10 +60,10 @@ using ParallelDataTransfer
     end
 
 
-    num_params = 30
+    num_params = 40
     wdecay     = 0
-    stepsize   = 0.02
-    const sys  = TwoLinkSys(N=200, h=0.02, σ0 = 0.01)
+    stepsize   = 0.01
+    const sys  = TwoLinkSys(N=200, h=0.02, σ0 = 0.0)
     true_jacobian(x,u) = true_jacobian(sys,x,u)
     nu         = sys.nu
     nx         = sys.nx
@@ -164,29 +168,29 @@ sendto(workers(), trajs=trajs, vt=vt)
 num_montecarlo = 2
 
 res = map(1:num_montecarlo) do it
+    r2 = @spawn begin
+        srand(it)
+        model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
+        opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
+        trainerad = ADModelTrainer(;model=model, opt=opt, λ=0.01, testdata = vt)
+        for i = 1:3
+            trainerad(trajs[i], epochs=0)
+        end
+        trainerad(epochs=2000)
+        trainerad
+    end
     r1 = @spawn begin
         srand(it)
-        models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
+        # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
+        models     = [DiffSystem(nx,nu,num_params, tanh)]
         opts       = ADAM.(params.(models), stepsize, decay=0.0005)#;
         trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = 20)
         for i = 1:3
             trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
             # traceplot(trainer)
         end
-        trainer(epochs=200)
+        trainer(epochs=2000)
         trainer
-    end
-
-    r2 = @spawn begin
-        srand(it)
-        model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
-        opt       = LTVModels.ADAMOptimizer(model.w, α = 0.2stepsize)
-        trainerad = ADModelTrainer(;model=model, opt=opt, λ=10, testdata = vt)
-        for i = 1:3
-            trainerad(trajs[i], epochs=0)
-        end
-        trainerad(epochs=150)
-        trainerad
     end
 
     println("Done with montecarlo run $it")
@@ -194,10 +198,10 @@ res = map(1:num_montecarlo) do it
 end
 res = [(fetch.(rs)...) for rs in res]
 
-# serializesave("results", res)
+# serialize("results", res)
 # res = deserialize("results")
-eigvalplot(res[1][1].models, vt, true_jacobian;  title="Standard", ylims=[-0.1,0.1], xlims=[0.5,1.1], layout=2)
-eigvalplot!(res[1][2].model, vt, true_jacobian;  title="AD Jacprop", ylims=[-0.1,0.1], xlims=[0.5,1.1], subplot=2);gui()
+eigvalplot(res[1][1].models, vt, true_jacobian;layout=2,subplot=1,cont=false,title="Standard", ylims=[-0.1,0.1], xlims=[0.5,1.1])
+eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", ylims=[-0.1,0.1], xlims=[0.5,1.1]);gui()
 plot(res[1][2].trace.iterations,[res[2].trace.values for res in res], c=:blue)
 plot!(res[1][2].trace.iterations,[res[2].tracev.values for res in res], c=:orange)
 plot!(res[1][1].trace.iterations,[res[1].trace.values for res in res]./4, c=:red, xscale=:log10, yscale=:log10, legend=false)
@@ -224,8 +228,8 @@ plot(vio1,vio2,vio3,title=infostring); gui()
 # savefig2("/local/home/fredrikb/papers/nn_prior/figs/valerr.tex")
 
 plot(trajs[1])
-predsimplot(resdiff[1].models, trajs[1]); gui()
-predsimplot(resad[1].model, trajs[1], reuse=false); gui()
+predsimplot(resdiff[1].models, trajs[3]); gui()
+predsimplot(resad[1].model, trajs[3], reuse=false); gui()
 # simulate(resad[1].model, trajs[1])' |> plot
 ##
 i = 1
@@ -236,9 +240,5 @@ simplot!(resad[j].model, simvals[i], lab="AD JAcprop")
 ##
 
 
-
-JacProp.eval_jac(resad[1], vt, true_jacobian)
-
-JacProp.models(resad[1])
-
-jacobian(resad[1].model,vt.xu[:,1])
+jacplot(resdiff[1].models, trajs[1], true_jacobian, ds=2, reuse=false)
+jacplot!(resad[1].model, trajs[1], ds=2); gui()

@@ -53,7 +53,6 @@ eigvalplot
             c --> (onlyat == 0 ? cmap[evalpoint] : (:blue))
             real.(e), imag.(e)
         end
-        # scatter!(real.(e), imag.(e), c=:blue, show=false, subplot=2, legend=false)
     end
     if truejac
         truejacfun = h.args[3]
@@ -86,41 +85,6 @@ eigvalplot
     delete!(plotattributes, :cont)
     nothing
 end
-
-# function display_modeltrainer(mt::ModelTrainer; kwargs...)
-#     ms = mt.models
-#     modeldict = OrderedDict("All models" => 0,
-#                 ["Model "*string(i) => i for i = 1:length(mt.models)]...)
-#
-#     hist = length(mt.modelhistory)
-#     ui = @manipulate for  t  = togglebuttons(1:length(mt.trajs), selected=1),
-#                           mn = togglebuttons(modeldict, selected=1),
-#                           modelversion = slider(1:hist,  value=hist, label="Model state"),
-#                           f       = slider(1:100, label="Filtering", value=0),
-#                           ds      = slider(1:100, value=4, label="Downsampling"),
-#                           eigvals = [true,false],
-#                           cont    = [true,false],
-#                           trajplot = togglebuttons(OrderedDict( "Prediction"=>1,
-#                                                                 "Simulation"=>2,
-#                                                                 "LTV pred"=>3,
-#                                                                 "LTV sim"=>4),
-#                                                                 multiselect=true)
-#
-#         ms        = mt.modelhistory[modelversion]
-#         modelinds = (mn <= 0 || mn > length(ms)) ? (1:length(ms)) : (mn:mn)
-#         ms = ms[modelinds]
-#         if eigvals
-#             eigvalplot(ms, mt.trajs[t]; ds=ds, cont=cont, kwargs...)
-#         else
-#             fig = plot(mt.trajs[t]; filtering=f, lab="True", kwargs...)
-#             1 ∈ trajplot && predplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
-#             2 ∈ trajplot && simplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
-#             3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
-#             4 ∈ trajplot && simplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
-#             fig
-#         end
-#     end
-# end
 
 
 @userplot PredPlot
@@ -199,11 +163,9 @@ jacplot
     if truejac
         truejacfun = h.args[3]
         Jtrue = map(x->truejacfun(x...), [(t.x[:,i],t.u[:,i]) for i=1:ds:size(t.x,2)])
-        @show Jtrue[1] - Jtrue[end]
     end
     show --> false
-    conf = !(ms isa LTVModelsBase.AbstractModel)
-    if !conf
+    if ms isa LTVModelsBase.LTVStateSpaceModel
         Jm = reshape(cat(2,ms.At, ms.Bt), :, length(ms))[:,1:ds:end]
     else
         Jm,Js = jacobians(ms, t, ds)
@@ -219,7 +181,7 @@ jacplot
             getindex.(Jtrue,i)
         end
         @series begin
-            conf && (ribbon --> 2Js[i,:])
+            Js == nothing || (ribbon --> 2Js[i,:])
             label --> "Estimated"
             fillalpha --> 0.4
             Jm[i,:]
@@ -290,3 +252,39 @@ traceplot
     yscale --> :log10
     trace
 end
+
+
+# function display_modeltrainer(mt::ModelTrainer; kwargs...)
+#     ms = mt.models
+#     modeldict = OrderedDict("All models" => 0,
+#                 ["Model "*string(i) => i for i = 1:length(mt.models)]...)
+#
+#     hist = length(mt.modelhistory)
+#     ui = @manipulate for  t  = togglebuttons(1:length(mt.trajs), selected=1),
+#                           mn = togglebuttons(modeldict, selected=1),
+#                           modelversion = slider(1:hist,  value=hist, label="Model state"),
+#                           f       = slider(1:100, label="Filtering", value=0),
+#                           ds      = slider(1:100, value=4, label="Downsampling"),
+#                           eigvals = [true,false],
+#                           cont    = [true,false],
+#                           trajplot = togglebuttons(OrderedDict( "Prediction"=>1,
+#                                                                 "Simulation"=>2,
+#                                                                 "LTV pred"=>3,
+#                                                                 "LTV sim"=>4),
+#                                                                 multiselect=true)
+#
+#         ms        = mt.modelhistory[modelversion]
+#         modelinds = (mn <= 0 || mn > length(ms)) ? (1:length(ms)) : (mn:mn)
+#         ms = ms[modelinds]
+#         if eigvals
+#             eigvalplot(ms, mt.trajs[t]; ds=ds, cont=cont, kwargs...)
+#         else
+#             fig = plot(mt.trajs[t]; filtering=f, lab="True", kwargs...)
+#             1 ∈ trajplot && predplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+#             2 ∈ trajplot && simplot!(ms,mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+#             3 ∈ trajplot && predplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+#             4 ∈ trajplot && simplot!(KalmanModel(mt,mt.trajs[t]),mt.trajs[t]; filtering=f, l=:dash, subplot=1)
+#             fig
+#         end
+#     end
+# end
