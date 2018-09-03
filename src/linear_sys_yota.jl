@@ -3,7 +3,7 @@ using Plots
 default(grid=false) #src
 plot(randn(10))
 # closeall();gui()
-using Parameters, LTVModelsBase, ValueHistories, DSP, ForwardDiff, Nabla#, JLD, ReverseDiff#, JacProp
+using Parameters, LTVModelsBase, ValueHistories, DSP, ForwardDiff, AutoGrad #Zygote #Yota#, JLD, ReverseDiff#, JacProp
 const Diff = ForwardDiff
 # const RDiff = ReverseDiff
 @with_kw struct LinearSys
@@ -93,11 +93,11 @@ function pred(w,x)
     for i=1:2:length(w)-2
         state = tanh.(w[i]*state .+ w[i+1])
     end
-    return w[end-1]*state .+ w[end] .+ x[1:nx,:]
+    return w[end-1]*state .+ w[end] #.+ x[1:nx,:]
 end
 
 
-cost(w,x,y)  = sum(abs2.( pred(w,x) .- y))/size(y,2)
+cost(w,x,y)  = sum(abs2.( pred(w,x) - y))/size(y,2)
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
 cost(w,data) = cost(w, data...)
 
@@ -108,8 +108,8 @@ function loss(w,x,y)
         model(x)    = pred(w,x)
         jcfg        = Diff.JacobianConfig(model, x[:,1], chunk)
         jacobian(x) = Diff.jacobian(model, x, jcfg)
-        @show l = cost(w,x,y)
-        @show J1 = jacobian(x[:,1])
+        l = cost(w,x,y)
+        J1 = jacobian(x[:,1])
         for t = 2:size(x,2)
             J2 = jacobian(x[:,t])
             l += 2sum(abs2.(J1.-J2))
@@ -133,11 +133,14 @@ function runtrain(w, loss; epochs = 500)
     push!(tracev, 0, cost(w,dtst))
     g = similar.(w)
     m = zeros.(size.(g))
-    plot(reuse=false)
+    # plot(reuse=false)
     for epoch=1:epochs
         lossfun     = loss(w,x,y)
         γ = 0.85
-        g = ∇(lossfun)(w.-γ.*m)
+        # g = ∇(lossfun)(w.-γ.*m) # Nabla
+        # val,g = grad(lossfun, w) # Yota
+        # @show g = Zygote.gradient(w->cost(w,x,y), w)
+        g = AutoGrad.grad(lossfun)(w)
         for i in eachindex(g)
             @. m[i] = 0.002g[i] + γ*m[i]
             @. w[i] -= m[i]
@@ -145,10 +148,10 @@ function runtrain(w, loss; epochs = 500)
         if epoch % 10 == 0
             push!(trace, epoch, lossfun(w))
             push!(tracev, epoch, cost(w,dtst))
-            plot(trace, reuse=true)
-            plot!(tracev)
-            gui()
-            println(last(trace), last(tracev))
+        #     plot(trace, reuse=true)
+        #     plot!(tracev)
+        #     gui()
+        #     println(last(trace), last(tracev))
         end
     end
     trace,tracev
@@ -160,7 +163,7 @@ Base.convert(::Type{Yota.TReal}, f::Float64) = Yota.TReal(f)
 const sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
 srand(1)
 w1 = [ 0.1randn(Float64,sizes[1]), zeros(Float64,sizes[2]),0.1randn(Float64,sizes[3]),  zeros(Float64,sizes[4]) ]
-w1 = tovec(w1)
+# w1 = tovec(w1) # Not for yota
 w2 = deepcopy(w1)
 
 # res = runtrain(w1, (w,x,y)-> (w-> cost(w,x,y)), epochs=300)
