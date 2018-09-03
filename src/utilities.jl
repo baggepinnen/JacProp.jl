@@ -89,18 +89,20 @@ end
 tovec(w::Vector{<:Matrix}) = vcat([vec(w) for w in w]...)
 
 function pred(w,x,sizes)
+    i2 = i2m(w,x,sizes)
     state = copy(x)
     for i=1:2:length(sizes)-2
-        state = tanh.(i2m(w,i,sizes)*state .+ i2m(w,i+1,sizes))
+        state = tanh.(i2(w,i)*state .+ i2(w,i+1))
     end
-    return i2m(w,length(sizes)-1,sizes)*state .+ i2m(w,length(sizes),sizes)
+    return i2(w,length(sizes)-1)*state .+ i2(w,length(sizes))
 end
 function predd(w,x,sizes,nx)
-    state = copy(x)
+    i2 = i2m(w,x,sizes)
+    state = x
     for i=1:2:length(sizes)-2
-        state = tanh.(i2m(w,i,sizes)*state .+ i2m(w,i+1,sizes))
+        state = tanh.(i2(w,i)*state .+ i2(w,i+1))
     end
-    return i2m(w,length(sizes)-1,sizes)*state .+ i2m(w,length(sizes),sizes)# .+ x[1:nx,:]
+    return i2(w,length(sizes)-1)*state .+ i2(w,length(sizes))# .+ x[1:nx,:]
 end
 pred(m,x) = pred(m.w,x,m.sizes)
 predd(m,x) = predd(m.w,x,m.sizes,m.nx)
@@ -212,6 +214,34 @@ function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     end
 end
 
+function loss2(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+    chunk = Diff.Chunk(x[:,1])
+    model = mt.model
+    sizes, nx, nu = model.sizes, model.nx, model.nu
+    function lf(w)
+        # println("Entering loss function, typeof(w):", typeof(w))
+        @unpack λ,normalizer = mt
+        f(x)          = predd(w,x,sizes,nx)
+        jcfg          = Diff.JacobianConfig(f, x[:,1], chunk)
+        l             = cost(w,sizes,nx,x,y)
+        jacobian(J,x) = Diff.jacobian!(J,f, x, jcfg)
+        J1 = zeros(nx,nx+nu)
+        J2 = zeros(nx,nx+nu)
+        d = zeros(nx,nx+nu)
+        jacobian(J1,x[:,1])
+        s = 0.0
+        @fastmath @inbounds @simd for t = 2:size(x,2)
+            jacobian(J2,@view(x[:,t]))
+            d .= J1.-J2
+            s += sum(abs2,d)
+            copy!(J1,J2)
+            # J1 = J2
+        end
+        l += λ*s
+        l
+    end
+end
+
 function find_normalizer(w,data,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     x,y = data
     model = mt.model
@@ -229,7 +259,7 @@ end
 
 function i2m(w,i,sizes)
     s = [1; cumsum([prod.(sizes)...]) .+ 1]
-    reshape(view(w,s[i]:(s[i+1]-1)), sizes[i])
+    (w,i)->reshape(view(w,s[i]:(s[i+1]-1)), sizes[i])
 end
 
 
