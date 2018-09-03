@@ -7,9 +7,10 @@ length(workers()) == 1 && @show addprocs(4)
 
 # @everywhere using Revise
 using ParallelDataTransfer
-isdefined(:simulate_pendcart) || (@everywhere include(joinpath("/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
-@everywhere using PendCart
-@everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
+using Distributed
+@isdefined(simulate_pendcart) || (@everywhere include(joinpath("/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
+@everywhere using Main.PendCart
+@everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase, LinearAlgebra, Statistics, Random
 @everywhere using Flux: params, jacobian
 @everywhere using Flux.Optimise: Param, optimiser, expdecay
 @everywhere begin
@@ -163,10 +164,10 @@ resad = getindex.(res,2)
 # serialize("results", res)
 # res = deserialize("results")
 eigvalplot(res[1][1].models, vt, true_jacobian;layout=2,subplot=1,cont=false,title="Standard", ylims=[-0.3,0.3], xlims=[0.0,1.5])
-eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", ylims=[-0.3,0.3], xlims=[0.0,1.5]);gui()
+eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", ylims=[-0.3,0.3], xlims=[0.0,1.5])#gui()
 plot(res[1][2].trace.iterations,[res.trace.values for res in resad], c=:blue)
 plot!(res[1][2].trace.iterations,[res.tracev.values for res in resad], c=:orange)
-plot!(res[1][1].trace.iterations,[res.trace.values for res in resdiff]./4, c=:red, xscale=:log10, yscale=:log10, legend=false)
+plot!(res[1][1].trace.iterations,[res.trace.values for res in resdiff], c=:red, xscale=:log10, yscale=:log10, legend=false)
 
 
 
@@ -183,7 +184,7 @@ using StatPlots
 vio1 = boxplot(pred, lab=["Standard" "Jacobian propagation"], ylabel="Prediction RMS", reuse=false, yscale=:identity)
 vio2 = boxplot(sim, lab=["Standard" "Jacobian propagation"], ylabel="Simulation RMS", yscale=:identity)
 vio3 = boxplot(jac, lab=["Standard" "Jacobian propagation"], ylabel="Jacobian Error", yscale=:identity)
-plot(vio1,vio2,vio3,title=infostring); gui()
+plot(vio1,vio2,vio3,title=infostring)
 ##
 # savefig2("/local/home/fredrikb/papers/nn_prior/figs/valerr.tex")
 
