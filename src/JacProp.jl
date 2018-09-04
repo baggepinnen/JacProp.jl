@@ -7,6 +7,7 @@ using LTVModelsBase, Parameters, Reexport, Lazy, Juno, FunctionEnsembles
 using Flux: back!, truncate!, treelike, train!, mse, testmode!, params, jacobian, throttle
 using Flux.Optimise: Param, optimiser, RMSProp, expdecay
 using DSP, Plots, DataStructures, ReverseDiff#, InteractNext, Observables
+export plot, plot!, scatter, scatter!
 const RDiff = ReverseDiff
 const default_activations = [swish, Flux.sigmoid, tanh, elu]
 const IT = IterTools
@@ -107,7 +108,7 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
         @time tape = RDiff.GradientTape(lossfun, w) |> RDiff.compile
         println(" Done")
         increment!(trace, 1, lossfun(w...))
-        increment!(tracev, 1, cost(w,model.sizes,model.nx,datat))
+        increment!(tracev, 1, cost(w,model.nx,datat))
         lossfun, tape
     end
     g          = similar.(w)
@@ -118,19 +119,19 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
         # lossfun = loss(w,x,y,mt)
         for (i,(lossfun,tape)) in enumerate(losses)
             RDiff.gradient!(g,tape,w)
-            for (opt,g) in zip(opt,g)
-                opt(g, epoch)
+            for (opti,gi) in zip(opt,g)
+                opti(gi, epoch)
             end
             if epoch % 5 == 0
                 # mt.normalizer = find_normalizer(w,data[i],mt)
                 increment!(trace, epoch, lossfun(w...))
-                increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
-                # if i == length(losses) && myid() == 1
+                increment!(tracev, epoch, cost(w,model.nx,datat))
+                # if i == length(losses) && Distributed.myid() == 1
                 #     cb(model)
                 #     # plot(trace, reuse=true)
                 #     # plot!(tracev)
                 #     # gui()
-                #     println("Losses: ", last(trace), last(tracev)[2])
+                      # println("Losses: ", last(trace), last(tracev)[2])
                 # end
             end
         end

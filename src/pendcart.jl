@@ -1,16 +1,16 @@
-cd(@__DIR__)
-length(workers()) == 1 && @show addprocs(4)
+using ParallelDataTransfer
+using Distributed
+length(workers()) == 1 && @show addprocs(3)
 # TODO: scaled jacobian penalty
 # TODO: sample slower to move eigvals from 1
 # TODO: System instead of DiffSystem
 # DID set fixed normalizer updated every 50 steps
 
 # @everywhere using Revise
-using ParallelDataTransfer
-using Distributed
-@isdefined(simulate_pendcart) || (@everywhere include(joinpath("/local/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
+cd(@__DIR__)
+@isdefined(simulate_pendcart) || (@everywhere include(joinpath("/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
 @everywhere using Main.PendCart
-@everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase, LinearAlgebra, Statistics, Random, Hyperopt
+@everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase, LinearAlgebra, Statistics, Random
 @everywhere using Flux: params, jacobian
 @everywhere using Flux.Optimise: Param, optimiser, expdecay
 @everywhere begin
@@ -125,7 +125,7 @@ trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 sendto(workers(), trajs=trajs, vt=vt)
 
 ## Monte-Carlo evaluation
-num_montecarlo = 50
+num_montecarlo = 10
 it = 1
 res = map(1:num_montecarlo) do it
     r2 = @spawn begin
@@ -135,7 +135,7 @@ res = map(1:num_montecarlo) do it
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize)
         trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
-        for i = 1:2
+        for i = 1:1
             trainerad(trajs[i], epochs=0)
         end
         train!(trainerad, epochs=400,cb=cb)
@@ -145,7 +145,7 @@ res = map(1:num_montecarlo) do it
         wdecay = exp10.(range(-3, stop=1, length=1000))[rand(1:1000)]
         srand(it)
         # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-        models     = [System(nx,nu,num_params, tanh)]
+        models     = [DiffSystem(nx,nu,num_params, tanh)]
         opts       = [[ADAM.(params.(models), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
         trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = wdecay)
         for i = 1:2
@@ -159,24 +159,23 @@ res = map(1:num_montecarlo) do it
     println("Done with montecarlo run $it")
     r1,r2
 end
-trainer(epochs=2000)
-trainer
-# end
-#
-#     println("Done with montecarlo run $it")
-#     r1,r2
-# end
+
+
 res = [(fetch.(rs)...) for rs in res]
 resdiff = getindex.(res,1)
 resad = getindex.(res,2)
 
 # serialize("results", res)
 # res = deserialize("results")
-eigvalplot(res[1][1].models, vt, true_jacobian;layout=(2,1),subplot=1,cont=false,title="Standard", ylims=(-0.2,0.2))
-eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", link = :both, ylims=(-0.2,0.2))#gui()
-plot(res[1][2].trace.iterations,[res.trace.values for res in resad], c=:blue)
-plot!(res[1][2].trace.iterations,[res.tracev.values for res in resad], c=:orange)
-plot!(res[1][1].trace.iterations,[res.trace.values for res in resdiff], c=:red, xscale=:log10, yscale=:log10, legend=false)
+using Plots
+for i = 1:10
+    rd = resdiff[i]; rad = resad[i]
+    eigvalplot(rd.models, vt, true_jacobian;layout=(2,1),subplot=1,cont=false,title="Standard wd = $(rd.σdivider)", ylims=(-0.2,0.2))
+    eigvalplot!(rad.model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop λ = $(rad.λ)", link = :both, ylims=(-0.2,0.2)); display(current())
+end
+plot(resad[1].trace.iterations,[res.trace.values for res in resad], c=:blue)
+plot!(resad[1].trace.iterations,[res.tracev.values for res in resad], c=:orange)
+plot!(resdiff[1].trace.iterations,[res.trace.values for res in resdiff], c=:red, xscale=:log10, yscale=:log10, legend=false)
 
 
 

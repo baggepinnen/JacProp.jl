@@ -93,7 +93,7 @@ function predd(w,x,nx)
     for i=1:2:length(w)-2
         state = tanh.(w[i]*state .+ w[i+1])
     end
-    return w[end-1]*state .+ w[end]# .+ x[1:nx,:]
+    return w[end-1]*state .+ w[end] .+ x[1:nx,:]
 end
 pred(m,x) = pred(m.w,x)
 predd(m,x) = predd(m.w,x,m.nx)
@@ -105,15 +105,6 @@ predd(m,x) = predd(m.w,x,m.nx)
     nu::Int
     h::Float64 = 1.0
 end
-function ADSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
-    sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    w = [ Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) ]
-    wd          = tovec(w)
-    model(x)    = pred(m,x)
-    ADSystem(wd,sizes,nx,nu,h)
-end
-(m::ADSystem)(x) = pred(m, x)
-(m::ADSystem)(w,x) = pred(w, x, m.sizes)
 
 @with_kw struct ADDiffSystem{JT} <: AbstractDiffSystem
     w::NTuple{4, Matrix{Float64}}
@@ -125,11 +116,8 @@ end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     w = ( Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) )
-    # wd          = tovec(w)
     model(x)    = predd(w,x,nx)
-    jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
-    jacobian(x) = Diff.jacobian(model, x)
-    ADDiffSystem(w,sizes,nx,nu,h)
+    ADDiffSystem{4}(w,sizes,nx,nu,h)
 end
 (m::ADDiffSystem)(x) = predd(m, x)
 (m::ADDiffSystem)(w,x) = predd(w, x, m.nx)
@@ -184,25 +172,23 @@ function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     model = mt.model
     nx, nu = model.nx, model.nu
     function lf(w...)
-        println("Entering loss function, typeof(w): ", typeof(w), " length(w): ", length(w))
+        # println("Entering loss function, typeof(w): ", typeof(w), " length(w): ", length(w))
         @unpack λ,normalizer = mt
-        f(x)          = predd(w,x,nx)
-        l             = cost(w,nx,x,y)
-        jac(x)      = fdjac(f,x)
+        f(x)   = predd(w,x,nx)
+        l      = cost(w,nx,x,y)
+        jac(x) = fdjac(f,x)
         J1 = jac(x[:,1])
         # sd = fill(typeof(w[1])(0.),size(J1))
         for t = 2:size(x,2)
             J2 = jac(x[:,t])
             for i in eachindex(J1)
-                l += sum(abs2.(J1[i].-J2[i]))
+                l += λ*sum(abs2.(J1[i].-J2[i]))
             end
             # copy!(J1,J2)
             J1 = J2
         end
-        l *= λ
         l
     end
-    # lf(w::Tuple{NTuple{N,T}}) where {N,T} = lf(w[1])
 end
 
 function fdjac(f::Function,x::AbstractVector,epsilon=sqrt(eps()))
@@ -327,7 +313,7 @@ function Flux.jacobian(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
 end
 
 function Flux.jacobian(m::Union{ADSystem,ADDiffSystem}, x)
-    f(x) = predd(m.w, x, m.sizes, m.nx)
+    f(x) = predd(m.w, x, m.nx)
     j(x) = hcat(fdjac(f,x)...)
     j(x), nothing
 end
