@@ -6,8 +6,7 @@ using LTVModelsBase, Parameters, Reexport, Lazy, Juno, FunctionEnsembles
 @reexport using LTVModels, Flux, ValueHistories, IterTools, MLDataUtils
 using Flux: back!, truncate!, treelike, train!, mse, testmode!, params, jacobian, throttle
 using Flux.Optimise: Param, optimiser, RMSProp, expdecay
-using Plots, DataStructures, ForwardDiff, ReverseDiff#, InteractNext, Observables
-const Diff = ForwardDiff
+using DSP, Plots, DataStructures, ReverseDiff#, InteractNext, Observables
 const RDiff = ReverseDiff
 const default_activations = [swish, Flux.sigmoid, tanh, elu]
 const IT = IterTools
@@ -102,11 +101,14 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
     losses = map(data) do d
         x,y        = d
         lossfun    = loss(w,x,y,mt)
+        # ReverseDiff ===========================================================
         gcfg       = RDiff.GradientConfig(w)
         gc()
         print("Compiling tape ")
         @time tape = RDiff.GradientTape(lossfun, w, gcfg) |> RDiff.compile
         println(" Done")
+
+        # tape = 0
         increment!(trace, 1, lossfun(w))
         increment!(tracev, 1, cost(w,model.sizes,model.nx,datat))
         lossfun, tape
@@ -119,11 +121,12 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
         # lossfun = loss(w,x,y,mt)
         for (i,(lossfun,tape)) in enumerate(losses)
             RDiff.gradient!(g,tape,w)
+            # g = AutoGrad.grad(lossfun)(w)
             opt(g, epoch)
             if epoch % 5 == 0
                 # mt.normalizer = find_normalizer(w,data[i],mt)
-                # increment!(trace, epoch, lossfun(w))
-                # increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
+                increment!(trace, epoch, lossfun(w))
+                increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
                 # if i == length(losses) && myid() == 1
                 #     cb(model)
                 #     # plot(trace, reuse=true)

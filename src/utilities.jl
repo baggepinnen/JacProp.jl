@@ -107,42 +107,36 @@ end
 pred(m,x) = pred(m.w,x,m.sizes)
 predd(m,x) = predd(m.w,x,m.sizes,m.nx)
 
-@with_kw struct ADSystem{JT} <: AbstractSystem
+@with_kw struct ADSystem <: AbstractSystem
     w::Vector{Float64}
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     nx::Int
     nu::Int
     h::Float64 = 1.0
-    jacobian::JT
 end
 function ADSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     w = [ Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) ]
     wd          = tovec(w)
     model(x)    = pred(m,x)
-    jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
-    jacobian(x) = Diff.jacobian(model, x)
-    ADSystem(wd,sizes,nx,nu,h,jacobian)
+    ADSystem(wd,sizes,nx,nu,h)
 end
 (m::ADSystem)(x) = pred(m, x)
 (m::ADSystem)(w,x) = pred(w, x, m.sizes)
 
-@with_kw struct ADDiffSystem{JT} <: AbstractDiffSystem
+@with_kw struct ADDiffSystem <: AbstractDiffSystem
     w::Vector{Float64}
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     nx::Int
     nu::Int
     h::Float64 = 1.0
-    jacobian::JT
 end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     w = [ Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) ]
     wd          = tovec(w)
     model(x)    = predd(wd,x,sizes,nx)
-    jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
-    jacobian(x) = Diff.jacobian(model, x)
-    ADDiffSystem(wd,sizes,nx,nu,h,jacobian)
+    ADDiffSystem(wd,sizes,nx,nu,h)
 end
 (m::ADDiffSystem)(x) = predd(m, x)
 (m::ADDiffSystem)(w,x) = predd(w, x, m.sizes, m.nx)
@@ -191,56 +185,41 @@ cost(w,sizes,nx,data) = cost(w,sizes,nx, data...)
 
 # WARNING: don't assign to any vector with .= in the inner loss function closure
 function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
-    chunk = Diff.Chunk(x[:,1])
     model = mt.model
     sizes, nx, nu = model.sizes, model.nx, model.nu
     function lf(w)
         # println("Entering loss function, typeof(w):", typeof(w))
         @unpack λ,normalizer = mt
         f(x)          = predd(w,x,sizes,nx)
-        jcfg          = Diff.JacobianConfig(f, x[:,1], chunk)
         l             = cost(w,sizes,nx,x,y)
-        jacobian(x) = Diff.jacobian(f, x, jcfg)
-        J1 = jacobian(x[:,1])
-        sd = zeros(J1)
+        jac(x)      = fdjac(f,x)
+        J1 = jac(x[:,1])
+        # sd = fill(typeof(w[1])(0.),size(J1))
         for t = 2:size(x,2)
-            J2 = jacobian(x[:,t])
-            sd .+= abs2.(J1.-J2)
+            J2 = jac(x[:,t])
+            for i in eachindex(J1)
+                l += sum(abs2.(J1[i].-J2[i]))
+            end
             # copy!(J1,J2)
             J1 = J2
         end
-        l += λ*sum(sd./normalizer)
+        l *= λ
         l
     end
 end
 
-function loss2(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
-    chunk = Diff.Chunk(x[:,1])
-    model = mt.model
-    sizes, nx, nu = model.sizes, model.nx, model.nu
-    function lf(w)
-        # println("Entering loss function, typeof(w):", typeof(w))
-        @unpack λ,normalizer = mt
-        f(x)          = predd(w,x,sizes,nx)
-        jcfg          = Diff.JacobianConfig(f, x[:,1], chunk)
-        l             = cost(w,sizes,nx,x,y)
-        jacobian(J,x) = Diff.jacobian!(J,f, x, jcfg)
-        J1 = zeros(nx,nx+nu)
-        J2 = zeros(nx,nx+nu)
-        d = zeros(nx,nx+nu)
-        jacobian(J1,x[:,1])
-        s = 0.0
-        @fastmath @inbounds @simd for t = 2:size(x,2)
-            jacobian(J2,@view(x[:,t]))
-            d .= J1.-J2
-            s += sum(abs2,d)
-            copy!(J1,J2)
-            # J1 = J2
-        end
-        l += λ*s
-        l
+function fdjac(f::Function,x::AbstractVector,epsilon=sqrt(eps()))
+    n = length(x)
+    f_x = f(x)
+    shifted_x = copy(x)
+    map(eachindex(x)) do i
+        shifted_x[i] += epsilon
+        J = @fastmath (f(shifted_x) .- f_x) ./ epsilon
+        shifted_x[i] = x[i]
+        J
     end
 end
+
 
 function find_normalizer(w,data,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     x,y = data
@@ -351,7 +330,9 @@ function Flux.jacobian(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
 end
 
 function Flux.jacobian(m::Union{ADSystem,ADDiffSystem}, x)
-    m.jacobian(x), nothing
+    f(x) = predd(m.w, x, m.sizes, m.nx)
+    j(x) = hcat(fdjac(f,x)...)
+    j(x), nothing
 end
 
 

@@ -8,9 +8,9 @@ length(workers()) == 1 && @show addprocs(4)
 # @everywhere using Revise
 using ParallelDataTransfer
 using Distributed
-@isdefined(simulate_pendcart) || (@everywhere include(joinpath("/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
+@isdefined(simulate_pendcart) || (@everywhere include(joinpath("/local/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
 @everywhere using Main.PendCart
-@everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase, LinearAlgebra, Statistics, Random
+@everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase, LinearAlgebra, Statistics, Random, Hyperopt
 @everywhere using Flux: params, jacobian
 @everywhere using Flux.Optimise: Param, optimiser, expdecay
 @everywhere begin
@@ -125,32 +125,34 @@ trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 sendto(workers(), trajs=trajs, vt=vt)
 
 ## Monte-Carlo evaluation
-num_montecarlo = 2
+num_montecarlo = 50
 it = 1
 res = map(1:num_montecarlo) do it
     r2 = @spawn begin
+        λ = exp10.(range(-3, stop=1, length=1000))[rand(1:1000)]
         srand(it)
         cb(model) = ()#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
-        trainerad = ADModelTrainer(;model=model, opt=opt, λ=0.1, testdata = vt)
+        trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
         for i = 1:2
             trainerad(trajs[i], epochs=0)
         end
-        train!(trainerad, epochs=2000,cb=cb)
+        train!(trainerad, epochs=400,cb=cb)
         trainerad
     end
     r1 = @spawn begin
+        wdecay = exp10.(range(-3, stop=1, length=1000))[rand(1:1000)]
         srand(it)
         # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
         models     = [System(nx,nu,num_params, tanh)]
         opts       = [[ADAM.(params.(models), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-        trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = 20)
+        trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = wdecay)
         for i = 1:2
             trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
             # traceplot(trainer)
         end
-        trainer(epochs=2000)
+        trainer(epochs=400)
         trainer
     end
 
@@ -163,8 +165,8 @@ resad = getindex.(res,2)
 
 # serialize("results", res)
 # res = deserialize("results")
-eigvalplot(res[1][1].models, vt, true_jacobian;layout=2,subplot=1,cont=false,title="Standard", ylims=[-0.3,0.3], xlims=[0.0,1.5])
-eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", ylims=[-0.3,0.3], xlims=[0.0,1.5])#gui()
+eigvalplot(res[1][1].models, vt, true_jacobian;layout=(2,1),subplot=1,cont=false,title="Standard", ylims=(-0.2,0.2))
+eigvalplot!(res[1][2].model, vt, true_jacobian;subplot=2,cont=false,title="AD Jacprop", link = :both, ylims=(-0.2,0.2))#gui()
 plot(res[1][2].trace.iterations,[res.trace.values for res in resad], c=:blue)
 plot!(res[1][2].trace.iterations,[res.tracev.values for res in resad], c=:orange)
 plot!(res[1][1].trace.iterations,[res.trace.values for res in resdiff], c=:red, xscale=:log10, yscale=:log10, legend=false)
@@ -189,8 +191,8 @@ plot(vio1,vio2,vio3,title=infostring)
 # savefig2("/local/home/fredrikb/papers/nn_prior/figs/valerr.tex")
 
 plot(trajs[1])
-predsimplot(resdiff[1].models, simvals[2]); gui()
-predsimplot(resad[1].model, simvals[2], reuse=false); gui()
+predsimplot(resdiff[1].models, simvals[2], title="Standard")
+predsimplot(resad[1].model, simvals[2], reuse=false, title="Jacprop")
 # simulate(resad[1].model, trajs[1])' |> plot
 ##
 i = 1
@@ -202,7 +204,7 @@ simplot!(resad[j].model, simvals[i], lab="AD JAcprop")
 
 
 jacplot(resdiff[1].models, simvals[1], true_jacobian, ds=2, reuse=false)
-jacplot!(resad[1].model, simvals[1], ds=2); gui()
+jacplot!(resad[1].model, simvals[1], ds=2)
 
 
 
@@ -215,18 +217,18 @@ jacplot!(resad[1].model, simvals[1], ds=2); gui()
 num_montecarlo = 40
 it = 1
 res = pmap(1:num_montecarlo) do it
-        λ = logspace(-2,2,100)[rand(1:100)]
-        num_params = rand(10:100)
-        srand(it)
-        model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
-        opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
-        trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
-        for i = 1:2
-            trainerad(trajs[i], epochs=0)
-        end
-        trainerad(epochs=2000)
-        println(it)
-        trainerad
+    λ = logspace(-2,2,100)[rand(1:100)]
+    num_params = rand(10:100)
+    srand(it)
+    model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
+    opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
+    trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
+    for i = 1:2
+        trainerad(trajs[i], epochs=0)
+    end
+    trainerad(epochs=2000)
+    println(it)
+    trainerad
 end
 # serialize("res", res)
 
