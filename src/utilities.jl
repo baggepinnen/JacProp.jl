@@ -88,27 +88,18 @@ end
 # Non-flux systems =========================================================================
 tovec(w::Vector{<:Matrix}) = vcat([vec(w) for w in w]...)
 
-function pred(w,x,sizes)
-    i2 = i2m(w,x,sizes)
-    state = copy(x)
-    for i=1:2:length(sizes)-2
-        state = tanh.(i2(w,i)*state .+ i2(w,i+1))
-    end
-    return i2(w,length(sizes)-1)*state .+ i2(w,length(sizes))
-end
-function predd(w,x,sizes,nx)
-    i2 = i2m(w,x,sizes)
+function predd(w,x,nx)
     state = x
-    for i=1:2:length(sizes)-2
-        state = tanh.(i2(w,i)*state .+ i2(w,i+1))
+    for i=1:2:length(w)-2
+        state = tanh.(w[i]*state .+ w[i+1])
     end
-    return i2(w,length(sizes)-1)*state .+ i2(w,length(sizes))# .+ x[1:nx,:]
+    return w[end-1]*state .+ w[end]# .+ x[1:nx,:]
 end
-pred(m,x) = pred(m.w,x,m.sizes)
-predd(m,x) = predd(m.w,x,m.sizes,m.nx)
+pred(m,x) = pred(m.w,x)
+predd(m,x) = predd(m.w,x,m.nx)
 
 @with_kw struct ADSystem{JT} <: AbstractSystem
-    w::Vector{Float64}
+    w::NTuple{4, Matrix{Float64}}
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     nx::Int
     nu::Int
@@ -128,7 +119,7 @@ end
 (m::ADSystem)(w,x) = pred(w, x, m.sizes)
 
 @with_kw struct ADDiffSystem{JT} <: AbstractDiffSystem
-    w::Vector{Float64}
+    w::NTuple{4, Matrix{Float64}}
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     nx::Int
     nu::Int
@@ -137,15 +128,15 @@ end
 end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    w = [ Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) ]
-    wd          = tovec(w)
-    model(x)    = predd(wd,x,sizes,nx)
+    w = ( Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) )
+    # wd          = tovec(w)
+    model(x)    = predd(w,x,nx)
     jfg         = Diff.JacobianConfig(model, zeros(nx+nu))
     jacobian(x) = Diff.jacobian(model, x)
-    ADDiffSystem(wd,sizes,nx,nu,h,jacobian)
+    ADDiffSystem(w,sizes,nx,nu,h,jacobian)
 end
 (m::ADDiffSystem)(x) = predd(m, x)
-(m::ADDiffSystem)(w,x) = predd(w, x, m.sizes, m.nx)
+(m::ADDiffSystem)(w,x) = predd(w, x, m.nx)
 
 Flux.testmode!(m::ADSystem, b=false) = nothing
 Flux.testmode!(m::ADDiffSystem, b=false) = nothing
@@ -184,25 +175,29 @@ end
 
 loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 
-# cost(w,x,y)  = sum(abs2, pred(w,x,sizes) .- y)/size(y,2)
-cost(w,sizes,nx,x,y)  = sum(abs2, predd(w,x,sizes,nx) .- y)/size(y,2) #+ 0.01sum(vecnorm.(w))
+# cost(w,x,y)  = sum(abs2, pred(w,x) .- y)/size(y,2)
+function cost(w,nx,x,y)
+    yh = predd(w,x,nx)
+    sum(abs2, yh .- y)/size(y,2) #+ 0.01sum(vecnorm.(w))
+end
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
-cost(w,sizes,nx,data) = cost(w,sizes,nx, data...)
+cost(w,nx,data) = cost(w,nx, data...)
 
 # WARNING: don't assign to any vector with .= in the inner loss function closure
 function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+    println("Entering outer loss function, typeof(w): ", typeof(w), " length(w): ", length(w))
     chunk = Diff.Chunk(x[:,1])
     model = mt.model
-    sizes, nx, nu = model.sizes, model.nx, model.nu
-    function lf(w)
-        # println("Entering loss function, typeof(w):", typeof(w))
+    nx, nu = model.nx, model.nu
+    function lf(w...)
+        println("Entering loss function, typeof(w): ", typeof(w), " length(w): ", length(w))
         @unpack λ,normalizer = mt
-        f(x)          = predd(w,x,sizes,nx)
+        f(x)          = predd(w,x,nx)
         jcfg          = Diff.JacobianConfig(f, x[:,1], chunk)
-        l             = cost(w,sizes,nx,x,y)
+        l             = cost(w,nx,x,y)
         jacobian(x) = Diff.jacobian(f, x, jcfg)
         J1 = jacobian(x[:,1])
-        sd = zeros(J1)
+        sd = zeros(size(J1))
         for t = 2:size(x,2)
             J2 = jacobian(x[:,t])
             sd .+= abs2.(J1.-J2)
@@ -212,18 +207,19 @@ function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
         l += λ*sum(sd./normalizer)
         l
     end
+    # lf(w::Tuple{NTuple{N,T}}) where {N,T} = lf(w[1])
 end
 
 function loss2(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     chunk = Diff.Chunk(x[:,1])
     model = mt.model
-    sizes, nx, nu = model.sizes, model.nx, model.nu
+    nx, nu = model.nx, model.nu
     function lf(w)
         # println("Entering loss function, typeof(w):", typeof(w))
         @unpack λ,normalizer = mt
-        f(x)          = predd(w,x,sizes,nx)
+        f(x)          = predd(w,x,nx)
         jcfg          = Diff.JacobianConfig(f, x[:,1], chunk)
-        l             = cost(w,sizes,nx,x,y)
+        l             = cost(w,nx,x,y)
         jacobian(J,x) = Diff.jacobian!(J,f, x, jcfg)
         J1 = zeros(nx,nx+nu)
         J2 = zeros(nx,nx+nu)
@@ -246,7 +242,7 @@ function find_normalizer(w,data,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     x,y = data
     model = mt.model
     sizes, nx, nu = model.sizes, model.nx, model.nu
-    f(x)          = predd(w,x,sizes,nx)
+    f(x)          = predd(w,x,nx)
     jcfg          = Diff.JacobianConfig(f, x[:,1])
     jacobian(x) = Diff.jacobian(f, x, jcfg)
     mJ = zeros(nx,nx+nu)

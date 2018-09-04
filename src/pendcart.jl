@@ -127,36 +127,36 @@ sendto(workers(), trajs=trajs, vt=vt)
 ## Monte-Carlo evaluation
 num_montecarlo = 2
 it = 1
-res = map(1:num_montecarlo) do it
-    r2 = @spawn begin
-        srand(it)
-        cb(model) = ()#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
-        model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
-        opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
-        trainerad = ADModelTrainer(;model=model, opt=opt, λ=0.1, testdata = vt)
-        for i = 1:2
-            trainerad(trajs[i], epochs=0)
-        end
-        train!(trainerad, epochs=2000,cb=cb)
-        trainerad
-    end
-    r1 = @spawn begin
-        srand(it)
-        # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-        models     = [System(nx,nu,num_params, tanh)]
-        opts       = [[ADAM.(params.(models), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
-        trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = 20)
-        for i = 1:2
-            trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
-            # traceplot(trainer)
-        end
-        trainer(epochs=2000)
-        trainer
-    end
-
-    println("Done with montecarlo run $it")
-    r1,r2
+# res = map(1:num_montecarlo) do it
+#     r2 = @spawn begin
+srand(it)
+cb(model) = ()#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
+model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
+opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize)
+trainerad = ADModelTrainer(;model=model, opt=opt, λ=0.1, testdata = vt)
+for i = 1:2
+    trainerad(trajs[i], epochs=0)
 end
+train!(trainerad, epochs=2000,cb=cb)
+trainerad
+# end
+# r1 = @spawn begin
+srand(it)
+# models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
+models     = [System(nx,nu,num_params, tanh)]
+opts       = [[ADAM.(params.(models), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = 20)
+for i = 1:2
+    trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
+    # traceplot(trainer)
+end
+trainer(epochs=2000)
+trainer
+# end
+#
+#     println("Done with montecarlo run $it")
+#     r1,r2
+# end
 res = [(fetch.(rs)...) for rs in res]
 resdiff = getindex.(res,1)
 resad = getindex.(res,2)
@@ -215,18 +215,18 @@ jacplot!(resad[1].model, simvals[1], ds=2); gui()
 num_montecarlo = 40
 it = 1
 res = pmap(1:num_montecarlo) do it
-        λ = logspace(-2,2,100)[rand(1:100)]
-        num_params = rand(10:100)
-        srand(it)
-        model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
-        opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
-        trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
-        for i = 1:2
-            trainerad(trajs[i], epochs=0)
-        end
-        trainerad(epochs=2000)
-        println(it)
-        trainerad
+    λ = logspace(-2,2,100)[rand(1:100)]
+    num_params = rand(10:100)
+    srand(it)
+    model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
+    opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
+    trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
+    for i = 1:2
+        trainerad(trajs[i], epochs=0)
+    end
+    trainerad(epochs=2000)
+    println(it)
+    trainerad
 end
 # serialize("res", res)
 

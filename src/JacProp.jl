@@ -102,16 +102,16 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
     losses = map(data) do d
         x,y        = d
         lossfun    = loss(w,x,y,mt)
-        gcfg       = RDiff.GradientConfig(w)
-        gc()
-        print("Compiling tape ")
-        @time tape = RDiff.GradientTape(lossfun, w, gcfg) |> RDiff.compile
+        # gcfg       = RDiff.GradientConfig(w)
+        GC.gc()
+        println("Compiling tape ")
+        @time tape = RDiff.GradientTape(lossfun, w) #|> RDiff.compile
         println(" Done")
-        increment!(trace, 1, lossfun(w))
+        increment!(trace, 1, lossfun(w...))
         increment!(tracev, 1, cost(w,model.sizes,model.nx,datat))
         lossfun, tape
     end
-    g          = similar(w)
+    g          = similar.(w)
     # epochs > 0 && plot(reuse=false)
     startepoch = last(trace)[1]+1
     @progress for epoch = startepoch:startepoch+epochs-1
@@ -119,10 +119,12 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
         # lossfun = loss(w,x,y,mt)
         for (i,(lossfun,tape)) in enumerate(losses)
             RDiff.gradient!(g,tape,w)
-            opt(g, epoch)
+            for (opt,g) in zip(opt,g)
+                opt(g, epoch)
+            end
             if epoch % 5 == 0
                 # mt.normalizer = find_normalizer(w,data[i],mt)
-                # increment!(trace, epoch, lossfun(w))
+                # increment!(trace, epoch, lossfun(w...))
                 # increment!(tracev, epoch, cost(w,model.sizes,model.nx,datat))
                 # if i == length(losses) && myid() == 1
                 #     cb(model)
