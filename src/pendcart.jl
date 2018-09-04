@@ -133,7 +133,7 @@ res = map(1:num_montecarlo) do it
         srand(it)
         cb(model) = ()#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
-        opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
+        opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize)
         trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
         for i = 1:2
             trainerad(trajs[i], epochs=0)
@@ -159,6 +159,13 @@ res = map(1:num_montecarlo) do it
     println("Done with montecarlo run $it")
     r1,r2
 end
+trainer(epochs=2000)
+trainer
+# end
+#
+#     println("Done with montecarlo run $it")
+#     r1,r2
+# end
 res = [(fetch.(rs)...) for rs in res]
 resdiff = getindex.(res,1)
 resad = getindex.(res,2)
