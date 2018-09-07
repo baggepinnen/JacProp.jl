@@ -71,7 +71,7 @@ function Flux.train!(mt::ModelTrainer; epochs=1, jacprop=0, useprior=true, trace
     @unpack models,opts,losses = mt
     data1 = todata(mt)
     jacprop > 0 && (ltvmodels = fit_models(mt, useprior))
-    startepoch = length(mt.trace)+1
+    startepoch = length(trace)+1
     @progress for epoch = startepoch:startepoch+epochs-1
         data = if jacprop > 0
             data2 = [todata(sample_jacprop(mt, ltvmodels)) for i = 1:jacprop]
@@ -101,12 +101,11 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
     mt.normalizer = ones(size(data[1][2], 1),size(data[1][1], 1))
     losses = map(data) do d
         x,y        = d
-        lossfun    = loss(w,x,y,mt)
-        # gcfg       = RDiff.GradientConfig(w)
-        GC.gc()
-        println("Compiling tape ")
-        @time tape = RDiff.GradientTape(lossfun, w) |> RDiff.compile
-        println(" Done")
+        lossfun    = loss2(w,x,y,mt)
+        # lossfun    = (w...)->cost(w,mt.model.nx, x,y)
+        # println("Compiling tape ")
+        tape = RDiff.GradientTape(lossfun, w) |> RDiff.compile
+        # println(" Done")
         increment!(trace, 1, lossfun(w...))
         increment!(tracev, 1, cost(w,model.nx,datat))
         lossfun, tape
@@ -122,10 +121,10 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
             for (opti,gi) in zip(opt,g)
                 opti(gi, epoch)
             end
+            increment!(tracev, epoch, cost(w,model.nx,datat))
+            increment!(trace, epoch, lossfun(w...))
             if epoch % 5 == 0
                 # mt.normalizer = find_normalizer(w,data[i],mt)
-                increment!(trace, epoch, lossfun(w...))
-                increment!(tracev, epoch, cost(w,model.nx,datat))
                 # if i == length(losses) && Distributed.myid() == 1
                 #     cb(model)
                 #     # plot(trace, reuse=true)

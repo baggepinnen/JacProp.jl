@@ -93,10 +93,23 @@ function predd(w,x,nx)
     for i=1:2:length(w)-2
         state = tanh.(w[i]*state .+ w[i+1])
     end
-    return w[end-1]*state .+ w[end] .+ x[1:nx,:]
+    return w[end-1]*state .+ w[end] #.+ x[1:nx,:]
 end
 pred(m,x) = pred(m.w,x)
 predd(m,x) = predd(m.w,x,m.nx)
+
+function preddjac(w,x,nx)
+    W1,b1,W2,b2 = w
+    a = W1*x .+ b1
+    state = tanh.(a)
+    Ja = tanjac.(a)[:]
+    J = W2*Matrix(Diagonal(Ja))*W1
+    # J += [Matrix{Float64}(I, nx, nx) zeros(nx)] # Not needed since we'll only use the difference
+    # @assert isapprox(J, hcat(fdjac(x->predd(w,x,nx),x)...), atol=1e-4)
+    return W2*state .+ b2 ,J#.+ x[1:nx,:], J
+end
+tanjac(x) = sech(x)^2
+
 
 @with_kw struct ADSystem{JT} <: AbstractSystem
     w::NTuple{4, Matrix{Float64}}
@@ -115,7 +128,7 @@ end
 end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    w = ( Flux.initn(sizes[1]), zeros(Float64,sizes[2]),Flux.initn(sizes[3]),  zeros(Float64,sizes[4]) )
+    w = ( Flux.glorot_uniform(sizes[1]...), zeros(Float64,sizes[2]),Flux.glorot_uniform(sizes[3]...),  zeros(Float64,sizes[4]) )
     model(x)    = predd(w,x,nx)
     ADDiffSystem{4}(w,sizes,nx,nu,h)
 end
@@ -162,7 +175,7 @@ loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 # cost(w,x,y)  = sum(abs2, pred(w,x) .- y)/size(y,2)
 function cost(w,nx,x,y)
     yh = predd(w,x,nx)
-    sum(abs2, yh .- y)/size(y,2) #+ 0.01sum(vecnorm.(w))
+    sum(abs2, yh .- y)/size(y,2) #+ 0.1sum(norm.(w).^2)
 end
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
 cost(w,nx,data) = cost(w,nx, data...)
@@ -190,6 +203,26 @@ function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
         l
     end
 end
+
+function loss2(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+    model = mt.model
+    nx, nu = model.nx, model.nu
+    function lf(w...)
+        @unpack λ,normalizer = mt
+        yh, J1 = preddjac(w,x[:,1],nx)
+        l = sum(abs2, yh .- y[:,1])
+        for t = 2:size(x,2)
+            yh, J2 = preddjac(w,x[:,t],nx)
+            l += sum(abs2, yh .- y[:,t])/size(y,2) + λ/2*sum(abs2.(J1.-J2))
+            # copy!(J1,J2)
+            J1 = J2
+        end
+        # l += λ/2*norm(w[1])^2 + λ/2*norm(w[2])^2
+        # l += λ*maximum(abs.(w[3]*w[1]))#λ*norm(w[1])^2 + λ*norm(w[2])^2
+        l
+    end
+end
+
 
 function fdjac(f::Function,x::AbstractVector,epsilon=sqrt(eps()))
     n = length(x)
