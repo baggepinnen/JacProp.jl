@@ -6,104 +6,103 @@
 # TODO: System instead of DiffSystem
 # DID set fixed normalizer updated every 50 steps
 
-# @everywhere using Revise
+# using Revise
 cd(@__DIR__)
-# using Distributed
-@isdefined(simulate_pendcart) || (@everywhere include(joinpath("/local/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
-@everywhere using Main.PendCart
-@everywhere using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase, LinearAlgebra, Statistics, Random
-@everywhere using Flux: params, jacobian
-@everywhere using Flux.Optimise: Param, optimiser, expdecay
-@everywhere begin
-    BLAS.set_num_threads(1)
-    @with_kw struct PendcartSys
-        N  = 1000
-        nu  = 1
-        nx = 4
-        h = 0.02
-        σ0 = 0
-        sind = 1:nx
-        uind = nx+1:(nx+nu)
-        s1ind = (nx+nu+1):(nx+nu+nx)
-    end
 
-    let h = 0.01, g = 9.82, l = 0.35, d = 1
-        global generate_data, true_jacobian
-        function fsys(xd,x,u)
-            xd[1] = x[2]
-            xd[2] = -g/l * sin(x[1]) + u[]/l * cos(x[1]) - d*x[2]
-            xd[3] = x[4]
-            xd[4] = u[]
-            xd
-        end
+@isdefined(simulate_pendcart) || (include(joinpath("/local/home/fredrikb/.julia/v0.6/GuidedPolicySearch/src/system_pendcart.jl")))
+using Main.PendCart
+using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase, LinearAlgebra, Statistics, Random
+using Flux: params, jacobian
+using Flux.Optimise: Param, optimiser, expdecay
 
-        function generate_data(sys::PendcartSys, seed, validation=false; ufun=u->filt(ones(200),[200], 20u')')
-            @unpack N, nu, h, σ0 = sys
-            srand(seed)
-            done = false
-            local x,u
-
-            fs = logspace(-3,-1.5,50)[randperm(50)[1:5]]
-            # u    = ufun(randn(nu,N+2))
-            u = sum(f->sin.(2π*f.* (1:N+2) .+ 2π*rand()), fs)'
-            u .+= 0.1randn(size(u))
-            t    = 0:h:N*h
-            x0   = [0.8π,0,0,0]
-            prob = OrdinaryDiffEq.ODEProblem((xd,x,p,t)->fsys(xd,x, u[:,floor(Int,t/h)+1]),x0,(t[[1,end]]...))
-            sol  = solve(prob,Tsit5(),reltol=1e-4,abstol=1e-4)
-            x    = hcat(sol(t)...)
-
-            u = u[:,1:N]
-            validation || (x .+= σ0 * randn(size(x)))
-            @assert all(isfinite, x)
-            @assert all(isfinite, u)
-            x,u
-        end
-
-        function true_jacobianc(sys::PendcartSys, x::AbstractVector, u::AbstractVector)
-            u[isnan.(u)] = 0
-            nx = size(x,1)
-            nu = size(u,1)
-            fx = Array{Float64}(nx,nx)
-            fu = Array{Float64}(nx)
-            fx[:,:] = [0 1 0 0;
-            -g/l*cos(x[1])-u/l*sin(x[1]) -d 0 0;
-            0 0 0 1;
-            0 0 0 0]
-            fu[:,:] = [0, cos(x[1])/l, 0, 1]
-            [fx  fu]
-        end
-
-        function true_jacobian(sys::PendcartSys, x::AbstractVector, u::AbstractVector)
-            J = true_jacobianc(sys,x,u)
-            ABd = expm([J*sys.h; zeros(nu, nx + nu)])[1:4,:]# ZoH sampling
-        end
-    end
-
-    function callbacker(epoch, loss,d,trace,model,mt)
-        i = epoch
-        # i = length(trace) + epoch - 1
-        function ()
-            l = sum(d->Flux.data(loss(d...)),d)
-            increment!(trace,epoch,l)
-            if i % 2 == 0
-                # @printf("Loss: %.4f\n", l)
-                # jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true)
-            end
-        end
-    end
-
-
-    num_params = 40
-    wdecay     = 0.1
-    stepsize   = 0.01
-    const sys  = PendcartSys(N=200, h=0.01, σ0 = 0.3)
-    true_jacobian(x,u)  = true_jacobian(sys,x,u)
-    true_jacobianc(x,u) = true_jacobianc(sys,x,u)
-    nu         = sys.nu
-    nx         = sys.nx
-
+BLAS.set_num_threads(1)
+@with_kw struct PendcartSys
+    N  = 1000
+    nu  = 1
+    nx = 4
+    h = 0.02
+    σ0 = 0
+    sind = 1:nx
+    uind = nx+1:(nx+nu)
+    s1ind = (nx+nu+1):(nx+nu+nx)
 end
+
+let h = 0.01, g = 9.82, l = 0.35, d = 1
+    global generate_data, true_jacobian
+    function fsys(xd,x,u)
+        xd[1] = x[2]
+        xd[2] = -g/l * sin(x[1]) + u[]/l * cos(x[1]) - d*x[2]
+        xd[3] = x[4]
+        xd[4] = u[]
+        xd
+    end
+
+    function generate_data(sys::PendcartSys, seed, validation=false; ufun=u->filt(ones(200),[200], 20u')')
+        @unpack N, nu, h, σ0 = sys
+        Random.seed!(seed)
+        done = false
+        local x,u
+
+        fs = exp10.(range(-3, stop=-1.5, length=50))[randperm(50)[1:5]]
+        # u    = ufun(randn(nu,N+2))
+        u = sum(f->sin.(2π*f.* (1:N+2) .+ 2π*rand()), fs)'
+        u .+= 0.1randn(size(u))
+        t    = 0:h:N*h
+        x0   = [0.8π,0,0,0]
+        prob = OrdinaryDiffEq.ODEProblem((xd,x,p,t)->fsys(xd,x, u[:,floor(Int,t/h)+1]),x0,(t[[1,end]]...,))
+        sol  = solve(prob,Tsit5(),reltol=1e-4,abstol=1e-4)
+        x    = hcat(sol(t)...)
+
+        u = u[:,1:N]
+        validation || (x .+= σ0 * randn(size(x)))
+        @assert all(isfinite, x)
+        @assert all(isfinite, u)
+        x,u
+    end
+
+    function true_jacobianc(sys::PendcartSys, x::AbstractVector, u::AbstractVector)
+        # u[isnan.(u)] = 0
+        nx = size(x,1)
+        nu = size(u,1)
+        fx = Array{Float64}(undef,nx,nx)
+        fu = Array{Float64}(undef,nx)
+        fx[:,:] .= [0 1 0 0;
+        -g/l*cos(x[1])-u[]/l*sin(x[1]) -d 0 0;
+        0 0 0 1;
+        0 0 0 0]
+        fu[:,:] .= [0, cos(x[1])/l, 0, 1]
+        [fx  fu]
+    end
+
+    function true_jacobian(sys::PendcartSys, x::AbstractVector, u::AbstractVector)
+        J = true_jacobianc(sys,x,u)
+        ABd = exp([J*sys.h; zeros(nu, nx + nu)])[1:4,:]# ZoH sampling
+    end
+end
+
+function callbacker(epoch, loss,d,trace,model,mt)
+    i = epoch
+    # i = length(trace) + epoch - 1
+    function ()
+        l = sum(d->Flux.data(loss(d...)),d)
+        increment!(trace,epoch,l)
+        if i % 2 == 0
+            # @printf("Loss: %.4f\n", l)
+            # jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true)
+        end
+    end
+end
+
+
+num_params = 30
+wdecay     = 0.1
+stepsize   = 0.01
+const sys  = PendcartSys(N=200, h=0.01, σ0 = 0.03)
+true_jacobian(x,u)  = true_jacobian(sys,x,u)
+true_jacobianc(x,u) = true_jacobianc(sys,x,u)
+nu         = sys.nu
+nx         = sys.nx
+
 
 
 ## Generate validation data
@@ -123,37 +122,37 @@ end
 vx,vu,vy = valdata()
 vt = Trajectory(vx,vu,vy)
 
-trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 
 # sendto(workers(), trajs=trajs, vt=vt)
 
 ## Monte-Carlo evaluation
-num_montecarlo = 8
+num_montecarlo = 50
 it = num_montecarlo ÷ 2
 res = map(1:num_montecarlo) do it
+    trajs = [Trajectory(generate_data(sys, i)...) for i = it .+ (1:2)]
     r2 = begin
-        srand(it)
+        Random.seed!(it)
         λ = exp10.(range(0, stop=2, length=num_montecarlo))[it]
         cb(model) = callbacker#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize)
         trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
-        for i = 1:1
-            trainerad(trajs[i], epochs=0)
+        for i = 1:2
+        trainerad(trajs[i], epochs=0)
         end
         trainerad
     end
     r1 = begin
-        srand(it)
+        Random.seed!(it)
         wdecay = exp10.(range(-1, stop=1, length=num_montecarlo))[it]
         # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
         models     = [System(nx,nu,num_params, tanh)]
         opts       = [[ADAM.(params.(models), stepsize); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
         # opts       = ADAM.(params.(models), stepsize)
         trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = wdecay)
-        for i = 1:1
-            trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
-            # traceplot(trainer)
+        for i = 1:2
+        trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
+        # traceplot(trainer)
         end
         trainer
     end
@@ -163,20 +162,20 @@ res = map(1:num_montecarlo) do it
 end
 
 
-res = [(fetch.(rs)...) for rs in res]
+res = [(fetch.(rs)...,) for rs in res]
 resdiff = getindex.(res,1)
 resad = getindex.(res,2)
 
 Base.Threads.@threads for trainerad in resad
-    train!(trainerad, epochs=1000)
+    train!(trainerad, epochs=800)
 end
 
 Base.Threads.@threads for trainer in resdiff
-    train!(trainer, epochs=1000)
+    train!(trainer, epochs=800)
 end
 
-# serialize("results", res)
-# res = deserialize("results")
+# serialize("results", (resad,resdiff))
+# resad,resdiff = deserialize("results")
 using Plots
 for i = 1:num_montecarlo
     rd = resdiff[i]; rad = resad[i]
@@ -193,9 +192,9 @@ nr = length(res[1])÷2
 labelvec = ["f" "g"]
 infostring = @sprintf("Num hidden: %d, sigma: %2.2f, Montecarlo: %d", num_params, sys.σ0, num_montecarlo)
 simvals = [Trajectory(generate_data(sys, i, true)...) for i = 4:6]
-pred  = [JacProp.eval_pred.(resdiff, vt) JacProp.eval_pred.(resad, vt)]
-sim   = vcat([[JacProp.eval_sim.(resdiff, simval) JacProp.eval_sim.(resad, simval)] for simval in simvals]...)
-jac   = [JacProp.eval_jac.(resdiff, vt, true_jacobian,3) JacProp.eval_jac.(resad, vt, true_jacobian,3)]
+pred  = [JacProp.eval_pred.(resdiff, (vt,)) JacProp.eval_pred.(resad, (vt,))]
+sim   = vcat([[JacProp.eval_sim.(resdiff, (simval,)) JacProp.eval_sim.(resad, (simval,))] for simval in simvals]...)
+jac   = [JacProp.eval_jac.(resdiff, (vt,), true_jacobian,3) JacProp.eval_jac.(resad, (vt,), true_jacobian,3)]
 
 ##
 using StatPlots
@@ -214,21 +213,16 @@ predsimplot(resad[1].model, simvals[2], reuse=false, title="Jacprop") |> display
 
 
 simvals = [Trajectory(generate_data(sys, i, true)...) for i = 4:6]
-jacplot(resdiff[2].models, simvals[1], true_jacobian, ds=2, reuse=false, size=(1200,800))
-jacplot!(resad[2].model, simvals[1], ds=2)
+jacplot(resdiff[1].models, simvals[1], true_jacobian, ds=2, reuse=false, size=(1200,800))
+jacplot!(resad[1].model, simvals[1], ds=2)
 
 
 
 
-
-
-
-jacplot(trainer.models, simvals[1], true_jacobian, ds=2, reuse=false, size=(1200,800))
-jacplot!(trainerad.model, simvals[1], ds=2)
-
-traceplot(trainerad,lab="AD");traceplot!(trainer, yscale=:identity,xscale=:log10, lab="Std"); plot!(trainerad.tracev)
-
-
+# jacplot(trainer.models, simvals[1], true_jacobian, ds=2, reuse=false, size=(1200,800))
+# jacplot!(trainerad.model, simvals[1], ds=2)
+#
+# traceplot(trainerad,lab="AD");traceplot!(trainer, yscale=:identity,xscale=:log10, lab="Std"); plot!(trainerad.tracev)
 
 
 
@@ -237,9 +231,9 @@ traceplot(trainerad,lab="AD");traceplot!(trainer, yscale=:identity,xscale=:log10
 num_montecarlo = 40
 it = 1
 res = pmap(1:num_montecarlo) do it
-    λ = logspace(-2,2,100)[rand(1:100)]
+    λ = exp10.(range(-2, stop=2, length=100))[rand(1:100)]
     num_params = rand(10:100)
-    srand(it)
+    Random.seed!(it)
     model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
     opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
     trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)

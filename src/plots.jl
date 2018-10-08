@@ -71,7 +71,7 @@ eigvalplot
 
     end
     delete!(plotattributes, :ds)
-    phi = linspace(-π/4,π/4,150)
+    phi = range(-π/4, stop=π/4, length=150)
     seriestype := :path
     if !cont
         ratio --> :equal

@@ -11,6 +11,7 @@ export plot, plot!, scatter, scatter!
 const RDiff = ReverseDiff
 const default_activations = [swish, Flux.sigmoid, tanh, elu]
 const IT = IterTools
+using Statistics, LinearAlgebra, Random
 
 abstract type AbstractModelTrainer end
 

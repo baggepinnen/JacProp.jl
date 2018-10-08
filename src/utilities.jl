@@ -19,7 +19,7 @@ end
 function System(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     ny = nx
     np = num_params
-    m  = Chain(Dense(nx+nu,np, activation), Dense(np, ny))
+    m  = Chain(Dense(nx+nu,np, activation), Dense(np,np, activation), Dense(np, ny))
     System(m, nx, nu, h)
 end
 (m::System)(x) = m.m(x)
@@ -34,7 +34,7 @@ end
 function DiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     ny = nx
     np = num_params
-    m  = Chain(Dense(nx+nu,np, activation), Dense(np, ny))
+    m  = Chain(Dense(nx+nu,np, activation), Dense(np,np, activation), Dense(np, ny))
     DiffSystem(m, nx, nu, h)
 end
 (m::DiffSystem)(x) = m.m(x)+x[1:m.nx,:]
@@ -99,16 +99,24 @@ pred(m,x) = pred(m.w,x)
 predd(m,x) = predd(m.w,x,m.nx)
 
 function preddjac(w,x,nx)
+
     W1,b1,W2,b2 = w
-    a = W1*x .+ b1
-    state = tanh.(a)
-    Ja = tanjac.(a)[:]
-    J = W2*Matrix(Diagonal(Ja))*W1
+    l = x
+    J = Matrix{eltype(w[1])}(I,length(x),length(x))
+    for i = 1:2:length(w)-2
+        W,b = w[i], w[i+1]
+        a = W*l .+ b
+        ∇a = W
+        l = tanh.(a)
+        ∇l = tanjac(a)
+        J = ∇l * ∇a * J
+    end
+    J = w[end-1] * J # Linear output layer
     # J += [Matrix{Float64}(I, nx, nx) zeros(nx)] # Not needed since we'll only use the difference
     # @assert isapprox(J, hcat(fdjac(x->predd(w,x,nx),x)...), atol=1e-4)
-    return W2*state .+ b2 ,J#.+ x[1:nx,:], J
+    return w[end-1]*l .+ w[end] , J#.+ x[1:nx,:], J
 end
-tanjac(x) = sech(x)^2
+tanjac(x) = Matrix(Diagonal((sech.(x).^2)[:]))
 
 
 @with_kw struct ADSystem{JT} <: AbstractSystem
@@ -120,15 +128,15 @@ tanjac(x) = sech(x)^2
 end
 
 @with_kw struct ADDiffSystem{JT} <: AbstractDiffSystem
-    w::NTuple{4, Matrix{Float64}}
+    w::NTuple{6, Matrix{Float64}}
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     nx::Int
     nu::Int
     h::Float64 = 1.0
 end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
-    sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    w = ( Flux.glorot_uniform(sizes[1]...), zeros(Float64,sizes[2]),Flux.glorot_uniform(sizes[3]...),  zeros(Float64,sizes[4]) )
+    sizes = ((num_params,nx+nu), (num_params,1), (num_params,num_params), (num_params,1), (nx,num_params), (nx,1))
+    w = ( Flux.glorot_uniform(sizes[1]...), zeros(Float64,sizes[2]),Flux.glorot_uniform(sizes[3]...),  zeros(Float64,sizes[4]), Flux.glorot_uniform(sizes[5]...),  zeros(Float64,sizes[6]) )
     model(x)    = predd(w,x,nx)
     ADDiffSystem{4}(w,sizes,nx,nu,h)
 end
@@ -213,7 +221,7 @@ function loss2(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
         l = sum(abs2, yh .- y[:,1])
         for t = 2:size(x,2)
             yh, J2 = preddjac(w,x[:,t],nx)
-            l += sum(abs2, yh .- y[:,t])/size(y,2) + λ/2*sum(abs2.(J1.-J2))
+            l += sum(abs2, yh .- y[:,t])/size(y,2) + λ*sum(abs2.(J1.-J2))
             # copy!(J1,J2)
             J1 = J2
         end
@@ -334,7 +342,7 @@ function Flux.jacobian(ms::AbstractEnsembleSystem, x::AbstractArray, testmode=tr
     jacs = [Flux.jacobian(m,x) for m in ms]
     # Flux.Tracker.zero_grad!.(params.(ms))
     jacmat = smartcat3(jacs)
-    squeeze(mean(jacmat, 3), 3), squeeze(std(jacmat, 3), 3)
+    dropdims(mean(jacmat, dims=3), dims=3), dropdims(std(jacmat, dims=3), dims=3)
 end
 
 function Flux.jacobian(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
@@ -358,7 +366,7 @@ models(mt::ModelTrainer) = mt.models
 models(mt::ADModelTrainer) = mt.model
 models(systems::Vector{<:AbstractSys}) = getfield.(systems, :m)
 models(results::AbstractVector) = [r[:m] for r in results]
-models(results::Associative) = [r[:m]]
+models(results::AbstractDict) = [r[:m]]
 _nx(s::AbstractSys) = s.nx
 _nx(v::AbstractVector) = _nx(v[1])
 _nx(trainer::ModelTrainer) = _nx(trainer.models)
@@ -443,7 +451,9 @@ end
 get_res(res,n) = getindex.(res,n)
 
 try
-    foreach(treelike, [System, DiffSystem, StabilizedDiffSystem, NominalDiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem])
+    foreach(T->treelike(JacProp, T), [System, DiffSystem, StabilizedDiffSystem, NominalDiffSystem, VelSystem, RecurrentSystem, RecurrentDiffSystem])
+catch err
+    @error(err)
 end
 
 function smartcat2(vv)
