@@ -119,7 +119,7 @@ end
 tanjac(x) = Matrix(Diagonal((sech.(x).^2)[:]))
 
 
-@with_kw struct ADSystem <: AbstractDiffSystem
+@with_kw struct ADSystem <: AbstractSystem
     w::NTuple{6, Matrix{Float64}}
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     nx::Int
@@ -138,7 +138,7 @@ function ADSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (num_params,num_params), (num_params,1), (nx,num_params), (nx,1))
     w = ( Flux.glorot_uniform(sizes[1]...), zeros(Float64,sizes[2]),Flux.glorot_uniform(sizes[3]...),  zeros(Float64,sizes[4]), Flux.glorot_uniform(sizes[5]...),  zeros(Float64,sizes[6]) )
     model(x)    = pred(w,x,nx)
-    ADDiffSystem(w,sizes,nx,nu,h)
+    ADSystem(w,sizes,nx,nu,h)
 end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (num_params,num_params), (num_params,1), (nx,num_params), (nx,1))

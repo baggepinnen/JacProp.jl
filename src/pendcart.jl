@@ -198,13 +198,14 @@ resad = getindex.(res,2)
 resdiff = getindex.(res,3)
 resaddiff = getindex.(res,4)
 
-Threads.@threads for trainer=ress       train!(trainer, epochs=800) end
+
+Threads.@threads for trainer=ress       train!(trainer, epochs=800÷2) end
 @info("Done ress")
-Threads.@threads for trainer=resad      train!(trainer, epochs=900) end
+Threads.@threads for trainer=resad      train!(trainer, epochs=2) end
 @info("Done resad")
-Threads.@threads for trainer=resdiff    train!(trainer, epochs=400) end
+Threads.@threads for trainer=resdiff    train!(trainer, epochs=400÷2) end
 @info("Done resdiff")
-Threads.@threads for trainer=resaddiff  train!(trainer, epochs=400) end
+Threads.@threads for trainer=resaddiff  train!(trainer, epochs=400÷2) end
 @info("Done resaddiff")
 
 # serialize("results", (resad,resdiff))

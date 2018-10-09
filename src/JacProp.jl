@@ -100,7 +100,7 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
     data       = todata(mt)
     datat      = todata([testdata])
     mt.normalizer = ones(size(data[1][2], 1),size(data[1][1], 1))
-    predfun = model isa ADSystem ? pred : predd
+    @show predfun = model isa ADSystem ? pred : predd
     f(x)   = predfun(w,x,model.nx)
     losses = map(data) do d
         x,y        = d

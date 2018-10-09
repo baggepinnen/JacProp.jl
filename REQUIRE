@@ -10,3 +10,4 @@ IterTools
 MLDataUtils
 Reexport
 DataStructures
+ReverseDiff
