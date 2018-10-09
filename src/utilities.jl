@@ -88,18 +88,18 @@ end
 # Non-flux systems =========================================================================
 tovec(w::Vector{<:Matrix}) = vcat([vec(w) for w in w]...)
 
-function predd(w,x,nx)
+function pred(w,x,nx)
     state = x
     for i=1:2:length(w)-2
         state = tanh.(w[i]*state .+ w[i+1])
     end
-    return w[end-1]*state .+ w[end] #.+ x[1:nx,:]
+    return w[end-1]*state .+ w[end]
 end
 pred(m,x) = pred(m.w,x)
 predd(m,x) = predd(m.w,x,m.nx)
+predd(w,x,nx) = pred(w,x,nx) .+ x[1:nx,:]
 
-function preddjac(w,x,nx)
-
+function pred_jac(w,x,nx)
     W1,b1,W2,b2 = w
     l = x
     J = Matrix{eltype(w[1])}(I,length(x),length(x))
@@ -119,27 +119,35 @@ end
 tanjac(x) = Matrix(Diagonal((sech.(x).^2)[:]))
 
 
-@with_kw struct ADSystem{JT} <: AbstractSystem
-    w::NTuple{4, Matrix{Float64}}
-    sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
-    nx::Int
-    nu::Int
-    h::Float64 = 1.0
-end
-
-@with_kw struct ADDiffSystem{JT} <: AbstractDiffSystem
+@with_kw struct ADSystem <: AbstractDiffSystem
     w::NTuple{6, Matrix{Float64}}
     sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
     nx::Int
     nu::Int
     h::Float64 = 1.0
 end
+
+@with_kw struct ADDiffSystem <: AbstractDiffSystem
+    w::NTuple{6, Matrix{Float64}}
+    sizes = ((num_params,nx+nu), (num_params,1), (nx,num_params), (nx,1))
+    nx::Int
+    nu::Int
+    h::Float64 = 1.0
+end
+function ADSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
+    sizes = ((num_params,nx+nu), (num_params,1), (num_params,num_params), (num_params,1), (nx,num_params), (nx,1))
+    w = ( Flux.glorot_uniform(sizes[1]...), zeros(Float64,sizes[2]),Flux.glorot_uniform(sizes[3]...),  zeros(Float64,sizes[4]), Flux.glorot_uniform(sizes[5]...),  zeros(Float64,sizes[6]) )
+    model(x)    = pred(w,x,nx)
+    ADDiffSystem(w,sizes,nx,nu,h)
+end
 function ADDiffSystem(nx::Int,nu::Int, num_params::Int, activation::Function, h=1)
     sizes = ((num_params,nx+nu), (num_params,1), (num_params,num_params), (num_params,1), (nx,num_params), (nx,1))
     w = ( Flux.glorot_uniform(sizes[1]...), zeros(Float64,sizes[2]),Flux.glorot_uniform(sizes[3]...),  zeros(Float64,sizes[4]), Flux.glorot_uniform(sizes[5]...),  zeros(Float64,sizes[6]) )
     model(x)    = predd(w,x,nx)
-    ADDiffSystem{4}(w,sizes,nx,nu,h)
+    ADDiffSystem(w,sizes,nx,nu,h)
 end
+(m::ADSystem)(x) = pred(m, x)
+(m::ADSystem)(w,x) = pred(w, x, m.nx)
 (m::ADDiffSystem)(x) = predd(m, x)
 (m::ADDiffSystem)(w,x) = predd(w, x, m.nx)
 
@@ -181,22 +189,23 @@ end
 loss(m::AbstractSys) = (x,y) -> sum((m(x).-y).^2)/size(x,2)
 
 # cost(w,x,y)  = sum(abs2, pred(w,x) .- y)/size(y,2)
-function cost(w,nx,x,y)
-    yh = predd(w,x,nx)
+function cost(f,x,y)
+    yh = f(x)
     sum(abs2, yh .- y)/size(y,2) #+ 0.1sum(norm.(w).^2)
 end
 # cost(w,data) = sum(cost(w, d...) for d in data)/length(data)
-cost(w,nx,data) = cost(w,nx, data...)
+cost(f,data) = cost(f, data...)
 
 # WARNING: don't assign to any vector with .= in the inner loss function closure
-function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+function loss(w,x,y,mt::ADModelTrainer)
     model = mt.model
     nx, nu = model.nx, model.nu
+    predfun = model isa ADSystem ? pred : predd
     function lf(w...)
         # println("Entering loss function, typeof(w): ", typeof(w), " length(w): ", length(w))
         @unpack λ,normalizer = mt
-        f(x)   = predd(w,x,nx)
-        l      = cost(w,nx,x,y)
+        f(x)   = predfun(w,x,nx)
+        l      = cost(f,x,y)
         jac(x) = fdjac(f,x)
         J1 = jac(x[:,1])
         # sd = fill(typeof(w[1])(0.),size(J1))
@@ -212,15 +221,22 @@ function loss(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
     end
 end
 
-function loss2(w,x,y,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+predjac(mt::ADModelTrainer{<:ADSystem,<:Any}) = pred_jac
+predjac(mt::ADModelTrainer{<:ADDiffSystem,<:Any}) = function (w,x,nx)
+    y,J = pred_jac(w,x,nx)
+    y + x[1:nx,:], J
+end
+
+function loss2(w,x,y,mt::ADModelTrainer)
     model = mt.model
     nx, nu = model.nx, model.nu
+    pj = predjac(mt)
     function lf(w...)
         @unpack λ,normalizer = mt
-        yh, J1 = preddjac(w,x[:,1],nx)
+        yh, J1 = pj(w,x[:,1],nx)
         l = sum(abs2, yh .- y[:,1])
         for t = 2:size(x,2)
-            yh, J2 = preddjac(w,x[:,t],nx)
+            yh, J2 = pj(w,x[:,t],nx)
             l += sum(abs2, yh .- y[:,t])/size(y,2) + λ*sum(abs2.(J1.-J2))
             # copy!(J1,J2)
             J1 = J2
@@ -245,7 +261,7 @@ function fdjac(f::Function,x::AbstractVector,epsilon=sqrt(eps()))
 end
 
 
-function find_normalizer(w,data,mt::ADModelTrainer{<:ADDiffSystem,<:Any})
+function find_normalizer(w,data,mt::ADModelTrainer)
     x,y = data
     model = mt.model
     sizes, nx, nu = model.sizes, model.nx, model.nu
@@ -353,7 +369,12 @@ function Flux.jacobian(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     squeeze(mean(jacmat, 3), 3), squeeze(std(jacmat, 3), 3)
 end
 
-function Flux.jacobian(m::Union{ADSystem,ADDiffSystem}, x)
+function Flux.jacobian(m::ADSystem, x)
+    f(x) = pred(m.w, x, m.nx)
+    j(x) = hcat(fdjac(f,x)...)
+    j(x), nothing
+end
+function Flux.jacobian(m::ADDiffSystem, x)
     f(x) = predd(m.w, x, m.nx)
     j(x) = hcat(fdjac(f,x)...)
     j(x), nothing

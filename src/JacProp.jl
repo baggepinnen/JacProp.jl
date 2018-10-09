@@ -100,6 +100,8 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
     data       = todata(mt)
     datat      = todata([testdata])
     mt.normalizer = ones(size(data[1][2], 1),size(data[1][1], 1))
+    predfun = model isa ADSystem ? pred : predd
+    f(x)   = predfun(w,x,model.nx)
     losses = map(data) do d
         x,y        = d
         lossfun    = loss2(w,x,y,mt)
@@ -108,7 +110,7 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
         tape = RDiff.GradientTape(lossfun, w) |> RDiff.compile
         # println(" Done")
         increment!(trace, 1, lossfun(w...))
-        increment!(tracev, 1, cost(w,model.nx,datat))
+        increment!(tracev, 1, cost(f,datat))
         lossfun, tape
     end
     g          = similar.(w)
@@ -122,7 +124,7 @@ function Flux.train!(mt::ADModelTrainer; epochs=1, jacprop=0, trace = mt.trace, 
             for (opti,gi) in zip(opt,g)
                 opti(gi, epoch)
             end
-            increment!(tracev, epoch, cost(w,model.nx,datat))
+            increment!(tracev, epoch, cost(f,datat))
             increment!(trace, epoch, lossfun(w...))
             if epoch % 5 == 0
                 # mt.normalizer = find_normalizer(w,data[i],mt)
