@@ -95,7 +95,7 @@ function pred(w,x,nx)
     end
     return w[end-1]*state .+ w[end]
 end
-pred(m,x) = pred(m.w,x)
+pred(m,x) = pred(m.w,x,m.nx)
 predd(m,x) = predd(m.w,x,m.nx)
 predd(w,x,nx) = pred(w,x,nx) .+ x[1:nx,:]
 
@@ -308,7 +308,7 @@ function simulate(ms::AbstractEnsembleSystem,xu::AbstractMatrix, testmode=true)
 end
 
 function simulate(ms::AbstractSys,xu::AbstractMatrix, testmode=true)
-    ms isa ADDiffSystem || Flux.testmode!.(ms, testmode)
+    ms isa Union{ADSystem,ADDiffSystem} || Flux.testmode!.(ms, testmode)
     xsim = copy(xu)
     nx = _nx(ms)
     for t = 2:size(xu,2)
