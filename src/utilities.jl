@@ -100,23 +100,22 @@ predd(m,x) = predd(m.w,x,m.nx)
 predd(w,x,nx) = pred(w,x,nx) .+ x[1:nx,:]
 
 function pred_jac(w,x,nx)
-    W1,b1,W2,b2 = w
     l = x
     J = Matrix{eltype(w[1])}(I,length(x),length(x))
     for i = 1:2:length(w)-2
         W,b = w[i], w[i+1]
-        a = W*l .+ b
-        ∇a = W
-        l = tanh.(a)
-        ∇l = tanjac(a)
-        J = ∇l * ∇a * J
+        a   = W*l .+ b
+        ∇a  = W
+        l   = tanh.(a)
+        ∇σ  = ∇tan(a)
+        J   = ∇σ * ∇a * J
     end
     J = w[end-1] * J # Linear output layer
     # J += [Matrix{Float64}(I, nx, nx) zeros(nx)] # Not needed since we'll only use the difference
     # @assert isapprox(J, hcat(fdjac(x->predd(w,x,nx),x)...), atol=1e-4)
     return w[end-1]*l .+ w[end] , J#.+ x[1:nx,:], J
 end
-tanjac(x) = Matrix(Diagonal((sech.(x).^2)[:]))
+∇tan(x) = Matrix(Diagonal((sech.(x).^2)[:]))
 
 
 @with_kw struct ADSystem <: AbstractSystem
