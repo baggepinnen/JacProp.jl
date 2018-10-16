@@ -2,9 +2,17 @@
 using Plots
 default(grid=false)
 cd(@__DIR__)
-using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase
+using Parameters, JacProp, OrdinaryDiffEq, LTVModels, LTVModelsBase, Random, LinearAlgebra, Statistics, DSP
 using Flux: params, jacobian
 using Flux.Optimise: Param, optimiser, expdecay
+
+function simaverage(x, n)
+    N,p = size(x)
+    res = map(1:p) do i
+        mean(reshape(x[:,i], N÷n,:), dims=2)
+    end
+    hcat(res...)
+end
 
 @with_kw struct LinearSys <: AbstractSystem
     A
@@ -20,18 +28,18 @@ using Flux.Optimise: Param, optimiser, expdecay
 end
 
 function LinearSys(seed; nx = 10, nu = nx, h=0.02, kwargs...)
-    srand(seed)
+    Random.seed!(seed)
     A = randn(nx,nx)
     A = A-A'        # skew-symmetric = pure imaginary eigenvalues
     A = A - h*I     # Make 'slightly' stable
-    A = expm(h*A)   # discrete time
+    A = exp(h*A)   # discrete time
     B = h*randn(nx,nu)
     LinearSys(;A=A, B=B, nx=nx, nu=nu, h=h, kwargs...)
 end
 
 function generate_data(sys::LinearSys, seed, validation=false)
     Parameters.@unpack A,B,N, nx, nu, h, σ0 = sys
-    srand(seed)
+    Random.seed!(seed)
     u      = filt(ones(5),[5], 10randn(N+2,nu))'
     t      = h:h:N*h+h
     x0     = randn(nx)
@@ -56,7 +64,7 @@ function callbacker(epoch, loss,d,trace,model,mt)
     function ()
         l = sum(d->Flux.data(loss(d...)),d)
         increment!(trace,epoch,l)
-        i % 500 == 0 && println(@sprintf("Loss: %.4f", l))
+        # i % 500 == 0 && println(@sprintf("Loss: %.4f", l))
     end
 end
 
@@ -90,44 +98,120 @@ vt = Trajectory(vx,vu,vy)
 trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 
 
+## Monte-Carlo evaluation
+num_montecarlo = 12
+it = num_montecarlo ÷ 2
+res = map(1:num_montecarlo) do it
+    trajs = [Trajectory(generate_data(sys, i)...) for i = it .+ (1:2)]
 
+    #' ## Without jacprop
+    Random.seed!(1)
+    # wdecay = exp10.(range(-6, stop=1, length=num_montecarlo))[it]
+    wdecay = 1e-4
+    models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
+    opts       = [[ADAM.(params.(models), stepsize, ϵ=1e-2); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
+    trainer  = ModelTrainer(;models=models, opts=opts, losses=JacProp.loss.(models), cb=callbacker, σdivider = wdecay)
+    for i = 1:2
+        trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
+    end
+    # trainer(epochs=2000)
+    # serializesave("trainer", trainer)
+    # trainer = deserialize("trainer")
+    #' ## With jacprop
 
-#' ## Without jacprop
+    # Random.seed!(1)
+    # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
+    # opts       = ADAM.(params.(models), stepsize, decay=0.0005)
+    # trainerjn  = ModelTrainer(;models=models, opts=opts, losses=JacProp.loss.(models), cb=callbacker, kalmanopts...)
+    # for i = 1:2
+    #     trainerjn(trajs[i], epochs=0, jacprop=1, useprior=false)
+    # end
+    # trainerjn(epochs=1000, jacprop=1)
+    # serialize("trainerjn", trainerjn)
+    # trainerjn = deserialize("trainerjn")
 
-srand(1)
-models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-opts       = ADAM.(params.(models), stepsize, decay=0.0005)
-trainer  = ModelTrainer(;models=models, opts=opts, losses=JacProp.loss.(models), cb=callbacker, kalmanopts...)
-for i = 1:3
-    trainer(trajs[i], epochs=0, jacprop=0, useprior=false)
+    #' ## With AD-jacprop
+    Random.seed!(1)
+    # λ = exp10.(range(-4, stop=3, length=num_montecarlo))[it]
+    λ = 0.15
+    model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
+    opt       = LTVModels.ADAMOptimizer.(model.w, α = 0.1stepsize)
+    trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
+    for i = 1:2
+        trainerad(trajs[i], epochs=0)
+    end
+    # trainerad(epochs=2000)
+    # serializesave("trainerad", trainerad)
+    # trainerad = deserialize("trainerad")
+
+    trainer, trainerad
 end
-trainer(epochs=2000)
-serializesave("trainer", trainer)
-trainer = deserialize("trainer")
-#' ## With jacprop
 
-srand(1)
-models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-opts       = ADAM.(params.(models), stepsize, decay=0.0005)
-trainerjn  = ModelTrainer(;models=models, opts=opts, losses=JacProp.loss.(models), cb=callbacker, kalmanopts...)
-for i = 1:3
-    trainerjn(trajs[i], epochs=0, jacprop=1, useprior=false)
-end
-trainerjn(epochs=1000, jacprop=1)
-serialize("trainerjn", trainerjn)
-trainerjn = deserialize("trainerjn")
+# ress = getindex.(res,1)
+# resad = getindex.(res,2)
+resdiff = getindex.(res,1)
+resaddiff = getindex.(res,2)
+# λs = getfield.(ress, :σdivider)
+# λad = getfield.(resad, :λ)
 
-#' ## With AD-jacprop
-srand(1)
-model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
-opt       = LTVModels.ADAMOptimizer(model.w, α = 0.1stepsize)
-trainerad = ADModelTrainer(;model=model, opt=opt, λ=1, testdata = vt)
-for i = 1:3
-    trainerad(trajs[i], epochs=0)
-end
-trainerad(epochs=500)
-# serializesave("trainerad", trainerad)
-# trainerad = deserialize("trainerad")
+# Threads.@threads for trainer=ress       train!(trainer, epochs=2500) end
+# @info("Done ress")
+# Threads.@threads for trainer=resad      train!(trainer, epochs=2500) end
+# @info("Done resad")
+Threads.@threads for trainer=resdiff    train!(trainer, epochs=300) end
+@info("Done resdiff")
+Threads.@threads for trainer=resaddiff  train!(trainer, epochs=300) end
+@info("Done resaddiff")
+
+# serialize("results_linear_eigvals_final", (resdiff,resaddiff))
+# (resdiff,resaddiff) = deserialize("results_linear_eigvals_final")
+
+using JacProp: eval_pred, eval_sim, eval_jac, eval_jac2
+λd = getfield.(resdiff, :σdivider)
+λadd = getfield.(resaddiff, :λ)
+xv = [λd λadd]
+labelvec = ["f" "g"]
+infostring = @sprintf("Num hidden: %d, sigma: %2.2f, Montecarlo: %d", num_params, sys.σ0, num_montecarlo)
+simvals = [Trajectory(generate_data(sys, i, true)...) for i = 4:6]
+pred  = [eval_pred.(resdiff, (vt,)) eval_pred.(resaddiff, (vt,))]
+sim   = simaverage(vcat([[eval_sim.(resdiff, (simval,)) eval_sim.(resaddiff, (simval,))] for simval in simvals]...), 3)
+sim = [x > 10 ? NaN : x for x in sim]
+jac = [eval_jac2.(resdiff, (vt,), true_jacobian,3) eval_jac2.(resaddiff, (vt,), true_jacobian,3)]
+
+## Plot error vs λ regularization parameter
+plot(xv,pred, layout=(3,1), subplot=1, ylabel="Prediction RMS", lab=["Standard" "Jacobian propagation"], background_color_legend=false, xscale=:log10,yscale=:log10, size=(1200,1100),legend=false)
+plot!(xv,min.(sim,10), subplot=2, ylabel="Simulation RMS", lab=["Standard" "Jacobian propagation"], background_color_legend=false, xscale=:log10,yscale=:log10,legend=false)
+plot!(xv,jac, subplot=3, ylabel="Jacobian Error", lab=["Standard" "Jacobian propagation"], background_color_legend=false, xscale=:log10,yscale=:log10,legend=false)
+
+plot()
+traceplot!.(resdiff, m=(:blue, 1), markerstrokealpha=0)
+traceplot!.(resaddiff, m=(:red, 1), markerstrokealpha=0)
+plot!(getfield.(resaddiff, :tracev), m=(:green, 1), markerstrokealpha=0)
+gui()
+
+
+
+
+using StatPlots
+xticks = (1:2, ["Standard" "Jacprop"])
+xvals = [1 2].*ones(num_montecarlo)
+common = (marker_z=xv, legend=false, xticks=xticks)
+vio1 = violin(xvals,pred; title="Prediction RMS",ylims=(0,maximum(pred)), common...)
+# vio2 = violin(xvals,sim; title="Simulation RMS",  common...)
+vio3 = violin(xvals,(jac); title="Jacobian Error",ylims=(0,maximum(jac)), common...)
+plot(vio1,vio3, colorbar=false, layout=(1,2))
+# savefig3("/local/home/fredrikb/phdthesis/blackbox/figs/boxplot_linear.tex")
+
+
+common = (marker_z=xv, legend=false, xticks=false)
+vio1 = violin([1],pred[:,1]; ylabel="Prediction RMS",  side=:left, ylims=(0,maximum(pred)), common...)
+violin!([1],pred[:,2]; ylabel="Prediction RMS",  side=:right, ylims=(0,maximum(pred)), common...)
+vio3 = violin([1],jac[:,1]; ylabel="Jacobian Error", side=:left, ylims=(0,maximum(jac)), common...)
+violin!([1],jac[:,2]; ylabel="Jacobian Error", side=:right, ylims=(0,maximum(jac)), common...)
+plot(vio1,vio3, colorbar=false, layout=(1,2))
+
+
+
 
 #' ## Visualize result
 using Plots.PlotMeasures
@@ -141,15 +225,35 @@ fontopts = [(:xticks, 0:0.5:1), (:yticks, -0.3:0.3:0.3), (:xlims, (0,1.4)), (:yl
 
 #' The top row shows the error (Frobenius norm) in the Jacbians for several points sampled randomly in the state space. The bottow row shows the training errors. The training errors are lower without jacprop, but he greater error in the Jacobians for the validation data indicates overfitting, which is prevented by jacprop.
 
-eigvalplot(trainer.models, vt, true_jacobian; title="Baseline", layout=(1,3), subplot=1, size=(920,280), fontopts...)
-eigvalplot!(trainerjn.models, vt, true_jacobian;  title="Jacprop", subplot=2, fontopts...)
-eigvalplot!(trainerad.model, vt, true_jacobian;  title="AD Jacprop", subplot=3, fontopts...)
+eigvalplot(resdiff[5].models, vt, true_jacobian; title="Weight decay", layout=(1,2), subplot=1, size=(920,280), fontopts...)
+# eigvalplot!(trainerjn.models, vt, true_jacobian;  title="Jacprop", subplot=2, fontopts...)
+eigvalplot!(resaddiff[7].model, vt;  title="Jacprop", subplot=2, fontopts...)
 gui()
-savefig("/local/home/fredrikb/papers/nn_prior/figs/jacpropeig2.pdf")
+# savefig("/local/home/fredrikb/papers/nn_prior/figs/jacpropeig2.pdf")
 # pdftopng -r 300 -aa yes jacpropeig2.pdf jacpropeig2.png
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+error()
 #' # Weight decay
 #' ## Weight decay off
-srand(1)
+Random.seed!(1)
 models     = [System(nx,nu,num_params, a) for a in default_activations]
 opts       = ADAM.(params.(models), stepsize, decay=0.0005)
 trainers  = ModelTrainer(;models=models, opts=opts, losses=JacProp.loss.(models), cb=callbacker, kalmanopts...)
@@ -158,7 +262,7 @@ for i = 1:3
 end
 trainers(epochs=1000, jacprop=1)
 
-srand(1)
+Random.seed!(1)
 models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = ADAM.(params.(models), stepsize, decay=0.0005)
 trainerds  = ModelTrainer(;models=models, opts=opts, losses=JacProp.loss.(models), cb=callbacker, kalmanopts...)
@@ -169,7 +273,7 @@ trainerds(epochs=1000, jacprop=1)
 
 #' ## Weight decay on
 wdecay = 0.1
-srand(1)
+Random.seed!(1)
 models     = [System(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 trainerswd  = ModelTrainer(;models=models, opts=opts, losses=JacProp.loss.(models), cb=callbacker, kalmanopts...)
@@ -179,7 +283,7 @@ end
 trainerswd(epochs=1000, jacprop=1)
 
 
-srand(1)
+Random.seed!(1)
 models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
 opts       = [[ADAM(params(models[i]), stepsize, decay=0.0005); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
 trainerdswd  = ModelTrainer(;models=models, opts=opts, losses=JacProp.loss.(models), cb=callbacker, kalmanopts...)

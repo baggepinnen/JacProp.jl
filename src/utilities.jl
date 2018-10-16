@@ -91,7 +91,7 @@ tovec(w::Vector{<:Matrix}) = vcat([vec(w) for w in w]...)
 function pred(w,x,nx)
     state = x
     for i=1:2:length(w)-2
-        state = tanh.(w[i]*state .+ w[i+1])
+        state = swish.(w[i]*state .+ w[i+1])
     end
     return w[end-1]*state .+ w[end]
 end
@@ -104,10 +104,10 @@ function pred_jac(w,x,nx)
     J = Matrix{eltype(w[1])}(I,length(x),length(x))
     for i = 1:2:length(w)-2
         W,b = w[i], w[i+1]
-        a   = W*l .+ b
+        l   = W*l .+ b
+        ∇σ  = ∇swish!(l)
         ∇a  = W
-        l   = tanh.(a)
-        ∇σ  = ∇tan(a)
+        # l  .= swish.(l) # Reused l to save allocations
         J   = ∇σ * ∇a * J
     end
     J = w[end-1] * J # Linear output layer
@@ -115,7 +115,14 @@ function pred_jac(w,x,nx)
     # @assert isapprox(J, hcat(fdjac(x->predd(w,x,nx),x)...), atol=1e-4)
     return w[end-1]*l .+ w[end] , J#.+ x[1:nx,:], J
 end
-∇tan(x) = Matrix(Diagonal((sech.(x).^2)[:]))
+∇tanh(x) = Matrix(Diagonal((sech.(x).^2)[:]))
+∇relu(x) = Matrix(Diagonal(vec(ifelse.(x .<= 0, 0., 1.))))
+function ∇swish!(x)
+    σx = σ.(x)
+    x .= x.*σx
+    σx .= x .+ σx .* (1 .- x)
+    Matrix(Diagonal(vec(σx)))
+end
 
 
 @with_kw struct ADSystem <: AbstractSystem
@@ -334,7 +341,7 @@ simulate(ms::Union{AbstractSys,AbstractEnsembleSystem}, t::Trajectory; kwargs...
 function predict(ms::Vector, x::AbstractMatrix, testmode=true)
     Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
-    data(mean(y)), data.(extrema(y))
+    data(mean(y)), extrema(extrema.(y))
 end
 
 predict(ms, x::AbstractMatrix, testmode=true) = ms(x), nothing
@@ -452,6 +459,20 @@ end
 function eval_jac(trainer::AbstractModelTrainer, vt, truejacfun, ds=1)
     m = models(trainer)
     mean(i-> mean(abs2.(jacobian(m,vt.xu[:,i])[1] .- truejacfun(vt.x[:,i],vt.u[:,i]))), 1:ds:length(vt)) |> √
+end
+
+function eval_jac2(trainer::AbstractModelTrainer, vt, truejacfun, ds=1)
+    m = models(trainer)
+    nx = vt.nx
+    mean(1:ds:length(vt)) do i
+        J1, J2 = jacobian(m,vt.xu[:,i])[1], truejacfun(vt.x[:,i],vt.u[:,i])
+        err = 0mean(abs2.(J1[:,nx+1:end] .- J2[:,nx+1:end]))
+        e1,e2 = eigvals(J1[1:nx,1:nx]), eigvals(J2[1:nx,1:nx])
+        dm = abs2.(e1 .- e2')
+        dists = max.(minimum(dm, dims=1), minimum(dm, dims=2))
+        err  += sum(dists)
+        err
+    end |> √
 end
 
 
