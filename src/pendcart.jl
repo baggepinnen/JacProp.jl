@@ -104,7 +104,7 @@ end
 num_params = 30
 wdecay     = 0.1
 stepsize   = 0.01#0.01
-const sys  = PendcartSys(N=200, h=0.01*2, σ0 = 0.01)
+const sys  = PendcartSys(N=200, h=0.01, σ0 = 0.01) # Slow sampling h = 0.02
 true_jacobian(x,u)  = true_jacobian(sys,x,u)
 true_jacobianc(x,u) = true_jacobianc(sys,x,u)
 nu         = sys.nu
@@ -131,16 +131,17 @@ vt = Trajectory(vx,vu,vy)
 
 
 ## Monte-Carlo evaluation
-num_montecarlo = 30
+num_montecarlo = 40
 it = num_montecarlo ÷ 2
 res = map(1:num_montecarlo) do it
     trajs = [Trajectory(generate_data(sys, i)...) for i = it .+ (1:2)]
     r1 = begin
         Random.seed!(it)
-        # wdecay = exp10.(range(-8, stop=0, length=num_montecarlo))[it]
-        wdecay = 1e-5
+        wdecay = exp10.(range(-8, stop=0, length=num_montecarlo))[it]
+        # wdecay = 1e-5 # Slow, swish
+        # wdecay = exp10(-2.5) # Slow, tanh
         # models     = [System(nx,nu,num_params, a) for a in default_activations]
-        models     = [System(nx,nu,num_params, swish)]
+        models     = [System(nx,nu,num_params, tanh)]
         opts       = [[ADAM.(params.(models), stepsize, ϵ=1e-2); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
         # opts       = ADAM.(params.(models), stepsize)
         trainer  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = wdecay)
@@ -151,10 +152,11 @@ res = map(1:num_montecarlo) do it
     end
     r2 = begin
         Random.seed!(it)
-        # λ = exp10.(range(-4, stop=3, length=num_montecarlo))[it]
-        λ = 1
+        λ = exp10.(range(-4, stop=3, length=num_montecarlo))[it]
+        # λ = 1 # Slow, swish
+        # λ = 1 # Slow, tanh
         cb(model) = callbacker#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
-        model     = JacProp.ADSystem(nx,nu,num_params,swish) # TODO: swish has no effect
+        model     = JacProp.ADSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize, expdecay=0.009, ε=1e-2)
         trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
         for i = 1:2
@@ -164,10 +166,11 @@ res = map(1:num_montecarlo) do it
     end
     r3 = begin
         Random.seed!(it)
-        # wdecay = exp10.(range(-8, stop=0, length=num_montecarlo))[it]
-        wdecay = 1e-5
+        wdecay = exp10.(range(-8, stop=0, length=num_montecarlo))[it]
+        # wdecay = 1e-3 # Slow, swish
+        # wdecay = 1e-5 # Slow, tanh
         # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
-        models     = [DiffSystem(nx,nu,num_params, swish)]
+        models     = [DiffSystem(nx,nu,num_params, tanh)]
         opts       = [[ADAM.(params.(models), stepsize, ϵ=1e-2); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
         # opts       = ADAM.(params.(models), stepsize)
         trainerd  = ModelTrainer(models = models, opts = opts, losses = JacProp.loss.(models), cb=callbacker, P = 10, R2 = 10000I, σdivider = wdecay)
@@ -178,10 +181,11 @@ res = map(1:num_montecarlo) do it
     end
     r4 = begin
         Random.seed!(it)
-        # λ = exp10.(range(-6, stop=3, length=num_montecarlo))[it]
-        λ = 1e-4
+        λ = exp10.(range(-6, stop=3, length=num_montecarlo))[it]
+        # λ = 1e-4 # Slow, swish
+        # λ = 1 # Slow, tanh
         cb(model) = callbacker#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
-        model     = JacProp.ADDiffSystem(nx,nu,num_params,swish) # TODO: swish has no effect
+        model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize, expdecay=0.001, ε=1e-2)
         traineradd = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
         for i = 1:2
@@ -211,25 +215,26 @@ Threads.@threads for trainer=resdiff    train!(trainer, epochs=2500) end
 Threads.@threads for trainer=resaddiff  train!(trainer, epochs=2500) end
 @info("Done resaddiff")
 
-# serialize("results", (ress,resad,resdiff,resaddiff))
+serialize("results_fast_tanh", (ress,resad,resdiff,resaddiff))
 # (ress,resad,resdiff,resaddiff) = deserialize("results")
 using Plots
 using Plots.PlotMeasures
 ##
 F = font(18, "times")
 fontopts = (titlefont= F, tickfont= F, xtickfont= F, ytickfont= F, guidefont= F, xguidefont= F, yguidefont= F)
-common = (xlims=(0.4,1.2), ylims=(-0.2,0.2), size=(1000,600), m=(3,),cont=false, grid=false, link = :both, markeralpha=0.15, ds=1, markerstrokealpha=0, xticks=0.6:0.2:1, fontopts...)
+common = (xlims=(0.4,1.2), ylims=(-0.2,0.2), size=(1000,600), m=(3,),cont=false, grid=false, link = :both, markeralpha=0.15, ds=1, markerstrokealpha=0, xticks=0.6:0.2:1, colorbar=false, fontopts...)
 default(size=(1000, 1000))
-for i = 2#1:num_montecarlo
+nice(x) = @sprintf("%.2g", x)
+for i = 1#1:num_montecarlo
     rs = ress[i]; rad = resad[i]; rd = resdiff[i]; radd = resaddiff[i]
-    eigvalplot(rs.models, vt, true_jacobian;layout=(2,2),subplot=1,title="f Standard wd = $(rs.σdivider)", common...)
-    eigvalplot!(rad.model, vt, true_jacobian;subplot=2,title="f Jacprop \\lambda = $(rad.λ)", common...)
-    eigvalplot!(rd.models, vt, true_jacobian;subplot=3,title="g Standard wd = $(rd.σdivider)", common...)
-    eigvalplot!(radd.model, vt, true_jacobian;subplot=4,title="g Jacprop \\lambda = $(radd.λ)", common...)
+    eigvalplot(rs.models, vt, true_jacobian;layout=(2,2),subplot=1,title="f Weight decay = $(nice(rs.σdivider))", common...)
+    eigvalplot!(rad.model, vt, true_jacobian;subplot=2,title="f Jacprop \\lambda = $(nice(rad.λ))", common...)
+    eigvalplot!(rd.models, vt, true_jacobian;subplot=3,title="g Weight decay = $(nice(rd.σdivider))", common...)
+    eigvalplot!(radd.model, vt, true_jacobian;subplot=4,title="g Jacprop \\lambda = $(nice(radd.λ))", common...)
     gui()
     # display(current())
 end
-# savefig("/local/home/fredrikb/phdthesis/blackbox/figs/eigvals_pendcart_slow.pdf")
+# savefig("/local/home/fredrikb/phdthesis/blackbox/figs/eigvals_pendcart_slow_tanh.pdf")
 ##
 @recipe function ribbonplot(r::RibbonPlot)
     x,y = r.args[1:2]
@@ -265,15 +270,15 @@ plot!(xscale=:log10,yscale=:log10, xlabel="Epoch", ylabel="Cost")
 # savefig3("/local/home/fredrikb/phdthesis/blackbox/figs/trainerr.tex")
 ##
 
-using JacProp: eval_pred, eval_sim, eval_jac
+using JacProp: eval_pred, eval_sim, eval_jac, eval_jac2
 nr = length(res[1])÷2
 labelvec = ["f" "g"]
 infostring = @sprintf("Num hidden: %d, sigma: %2.2f, Montecarlo: %d", num_params, sys.σ0, num_montecarlo)
 simvals = [Trajectory(generate_data(sys, i, true)...) for i = 4:6]
 pred  = [eval_pred.(ress, (vt,)) eval_pred.(resad, (vt,)) eval_pred.(resdiff, (vt,)) eval_pred.(resaddiff, (vt,))]
 sim   = simaverage(vcat([[eval_sim.(ress, (simval,)) eval_sim.(resad, (simval,)) eval_sim.(resdiff, (simval,)) eval_sim.(resaddiff, (simval,))] for simval in simvals]...), 3)
-sim = [x > 10 ? NaN : x for x in sim]
-jac   = [eval_jac.(ress, (vt,), true_jacobian,3) eval_jac.(resad, (vt,), true_jacobian,3) eval_jac.(resdiff, (vt,), true_jacobian,3) eval_jac.(resaddiff, (vt,), true_jacobian,3)]
+# sim = [x > 10 ? NaN : x for x in sim]
+jac   = [eval_jac2.(ress, (vt,), true_jacobian,3) eval_jac2.(resad, (vt,), true_jacobian,3) eval_jac2.(resdiff, (vt,), true_jacobian,3) eval_jac2.(resaddiff, (vt,), true_jacobian,3)]
 
 ##
 using StatPlots
@@ -284,14 +289,14 @@ using StatPlots
 xv = [λs λad λd λadd]
 xticks = (1:2, ["\$f\$" "\$g\$"])
 xvals = [1 2].*ones(num_montecarlo)
-common = (marker_z=xv, legend=false, xticks=xticks, lab=["Standard" "Jacobian propagation"], c=:red)
-vio1 = violin(xvals,pred[:,1:2:end]; ylabel="Prediction RMS", side=:left, common...)
+common = (ygrid=true, marker_z=xv, legend=false, xticks=xticks, lab=["Standard" "Jacobian propagation"], c=:red, size=(1000,600))
+vio1 = violin(xvals,pred[:,1:2:end]; title="Prediction RMS", side=:left, common...)
 violin!(xvals,pred[:,2:2:end], side=:right, c=:blue)
-vio2 = violin(xvals,sim[:,1:2:end]; ylabel="Simulation RMS", side=:left, common...)
-violin!(xvals,sim[:,2:2:end], side=:right, c=:blue)
-vio3 = violin(xvals,(jac[:,1:2:end]); ylabel="Jacobian Error", yscale=:log10,side=:left, common...)
+# vio2 = violin(xvals,sim[:,1:2:end]; title="Simulation RMS", side=:left, common...)
+# violin!(xvals,sim[:,2:2:end], side=:right, c=:blue)
+vio3 = violin(xvals,(jac[:,1:2:end]); title="Jacobian Error", yscale=:log10,side=:left, common...)
 violin!(xvals,(jac[:,2:2:end]), yscale=:log10,side=:right, c=:blue)
-plot(vio1,vio3,title=infostring, colorbar=false, layout=(2,1))#size=(800,1000)) #|> display
+plot(vio1,vio3,ylabel=infostring, colorbar=false, layout=(1,2))#size=(800,1000)) #|> display
 ##
 # savetikz("/local/home/fredrikb/phdthesis/blackbox/figs/boxplot.tex")
 # savefig3("/local/home/fredrikb/phdthesis/blackbox/figs/boxplot.tex")
@@ -301,7 +306,7 @@ plot(vio1,vio3,title=infostring, colorbar=false, layout=(2,1))#size=(800,1000)) 
 
 
 ## Plot error vs λ regularization parameter
-plot(xv,pred, layout=(3,1), subplot=1, ylabel="Prediction RMS", lab=["Standard" "Jacobian propagation"], background_color_legend=false, xscale=:log10,yscale=:log10, size=(1200,1100),legend=false)
+plot(xv,pred, layout=(3,1), subplot=1, ylabel="Prediction RMS", lab=["Standard" "Jacobian propagation"], background_color_legend=false, xscale=:log10,yscale=:log10, size=(1200,1100),legend=true)
 plot!(xv,min.(sim,4), subplot=2, ylabel="Simulation RMS", lab=["Standard" "Jacobian propagation"], background_color_legend=false, xscale=:log10,yscale=:log10,legend=false)
 plot!(xv,jac, subplot=3, ylabel="Jacobian Error", lab=["Standard" "Jacobian propagation"], background_color_legend=false, xscale=:log10,yscale=:log10,legend=false)
 
@@ -345,7 +350,7 @@ res = pmap(1:num_montecarlo) do it
     λ = exp10.(range(-2, stop=2, length=100))[rand(1:100)]
     num_params = rand(10:100)
     Random.seed!(it)
-    model     = JacProp.ADDiffSystem(nx,nu,num_params,swish) # TODO: swish has no effect
+    model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
     opt       = LTVModels.ADAMOptimizer(model.w, α = stepsize)
     trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
     for i = 1:2
