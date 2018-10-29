@@ -344,7 +344,7 @@ function predict(ms::Vector, x::AbstractMatrix, testmode=true)
     data(mean(y)), extrema(extrema.(y))
 end
 
-predict(ms, x::AbstractMatrix, testmode=true) = ms(x), nothing
+predict(ms::Union{AbstractSys,Vector}, x::AbstractMatrix, testmode=true) = ms(x), nothing
 function predict(ms::EnsembleVelSystem, x::AbstractArray, testmode=true)
     Flux.testmode!.(ms, testmode)
     @ensemble y = ms(x)
@@ -416,8 +416,9 @@ function LTVModels.KalmanModel(ms::AbstractSys, t::Trajectory)
     xu = t.xu
     N  = size(xu,2)
     J  = map(1:length(t)) do i
-        jacobian(ms, xu[:,i])
+        jacobian(ms, xu[:,i])[1]
     end
+    eye(n) = Matrix{Float64}(I,n,n)
     At = cat([J[i][:,1:t.nx] for i = 1:length(t)]..., dims=3)
     Bt = cat([J[i][:,t.nx+1:end] for i = 1:length(t)]..., dims=3)
     Pt = cat([eye(length(J[1])) for i = 1:length(t)]..., dims=3)
