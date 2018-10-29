@@ -104,7 +104,7 @@ end
 num_params = 30
 wdecay     = 0.1
 stepsize   = 0.01#0.01
-const sys  = PendcartSys(N=200, h=0.01, σ0 = 0.01) # Slow sampling h = 0.02
+const sys  = PendcartSys(N=200, h=0.01*2, σ0 = 0.01) # Slow sampling h = 0.02
 true_jacobian(x,u)  = true_jacobian(sys,x,u)
 true_jacobianc(x,u) = true_jacobianc(sys,x,u)
 nu         = sys.nu
@@ -131,7 +131,7 @@ vt = Trajectory(vx,vu,vy)
 
 
 ## Monte-Carlo evaluation
-num_montecarlo = 40
+num_montecarlo = 30
 it = num_montecarlo ÷ 2
 res = map(1:num_montecarlo) do it
     trajs = [Trajectory(generate_data(sys, i)...) for i = it .+ (1:2)]
@@ -140,6 +140,7 @@ res = map(1:num_montecarlo) do it
         wdecay = exp10.(range(-8, stop=0, length=num_montecarlo))[it]
         # wdecay = 1e-5 # Slow, swish
         # wdecay = exp10(-2.5) # Slow, tanh
+        wdecay = exp10(-5) # Fast, tanh
         # models     = [System(nx,nu,num_params, a) for a in default_activations]
         models     = [System(nx,nu,num_params, tanh)]
         opts       = [[ADAM.(params.(models), stepsize, ϵ=1e-2); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
@@ -155,6 +156,7 @@ res = map(1:num_montecarlo) do it
         λ = exp10.(range(-4, stop=3, length=num_montecarlo))[it]
         # λ = 1 # Slow, swish
         # λ = 1 # Slow, tanh
+        λ = 1 # fast, tanh
         cb(model) = callbacker#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize, expdecay=0.009, ε=1e-2)
@@ -169,6 +171,7 @@ res = map(1:num_montecarlo) do it
         wdecay = exp10.(range(-8, stop=0, length=num_montecarlo))[it]
         # wdecay = 1e-3 # Slow, swish
         # wdecay = 1e-5 # Slow, tanh
+        wdecay = 1e-5 # Fast, tanh
         # models     = [DiffSystem(nx,nu,num_params, a) for a in default_activations]
         models     = [DiffSystem(nx,nu,num_params, tanh)]
         opts       = [[ADAM.(params.(models), stepsize, ϵ=1e-2); [expdecay(Param(p), wdecay) for p in params(models[i]) if p isa AbstractMatrix]] for i = 1:length(models)]
@@ -184,6 +187,7 @@ res = map(1:num_montecarlo) do it
         λ = exp10.(range(-6, stop=3, length=num_montecarlo))[it]
         # λ = 1e-4 # Slow, swish
         # λ = 1 # Slow, tanh
+        λ = exp10.(-2.5) # Fast, tanh
         cb(model) = callbacker#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize, expdecay=0.001, ε=1e-2)
@@ -215,8 +219,8 @@ Threads.@threads for trainer=resdiff    train!(trainer, epochs=2500) end
 Threads.@threads for trainer=resaddiff  train!(trainer, epochs=2500) end
 @info("Done resaddiff")
 
-serialize("results_fast_tanh", (ress,resad,resdiff,resaddiff))
-# (ress,resad,resdiff,resaddiff) = deserialize("results")
+# serialize("results_fast_tanh_final", (ress,resad,resdiff,resaddiff))
+# (ress,resad,resdiff,resaddiff) = deserialize("results_slow_tanh_final")
 using Plots
 using Plots.PlotMeasures
 ##
@@ -234,7 +238,7 @@ for i = 1#1:num_montecarlo
     gui()
     # display(current())
 end
-# savefig("/local/home/fredrikb/phdthesis/blackbox/figs/eigvals_pendcart_slow_tanh.pdf")
+# savefig("/local/home/fredrikb/phdthesis/blackbox/figs/eigvals_pendcart_fast_tanh.pdf")
 ##
 @recipe function ribbonplot(r::RibbonPlot)
     x,y = r.args[1:2]
@@ -271,9 +275,8 @@ plot!(xscale=:log10,yscale=:log10, xlabel="Epoch", ylabel="Cost")
 ##
 
 using JacProp: eval_pred, eval_sim, eval_jac, eval_jac2
-nr = length(res[1])÷2
 labelvec = ["f" "g"]
-infostring = @sprintf("Num hidden: %d, sigma: %2.2f, Montecarlo: %d", num_params, sys.σ0, num_montecarlo)
+infostring = @sprintf("NH:%d, s:%2.2f, MC:%d", num_params, sys.σ0, num_montecarlo)
 simvals = [Trajectory(generate_data(sys, i, true)...) for i = 4:6]
 pred  = [eval_pred.(ress, (vt,)) eval_pred.(resad, (vt,)) eval_pred.(resdiff, (vt,)) eval_pred.(resaddiff, (vt,))]
 sim   = simaverage(vcat([[eval_sim.(ress, (simval,)) eval_sim.(resad, (simval,)) eval_sim.(resdiff, (simval,)) eval_sim.(resaddiff, (simval,))] for simval in simvals]...), 3)
@@ -300,7 +303,7 @@ plot(vio1,vio3,ylabel=infostring, colorbar=false, layout=(1,2))#size=(800,1000))
 ##
 # savetikz("/local/home/fredrikb/phdthesis/blackbox/figs/boxplot.tex")
 # savefig3("/local/home/fredrikb/phdthesis/blackbox/figs/boxplot.tex")
-# savefig3("/local/home/fredrikb/phdthesis/blackbox/figs/boxplot_slow.tex")
+# savefig3("/local/home/fredrikb/phdthesis/blackbox/figs/boxplot_slow_tanh.tex")
 ##
 
 
@@ -318,8 +321,10 @@ simvals = [Trajectory(generate_data(sys, i, true)...) for i = 4:6]
 mno = 1
 # jacplot(ress[mno].models, simvals[1], true_jacobian, ds=2, reuse=false, size=(1200,800), c=[:red :cyan], linewidth=[3 1])
 # jacplot(resad[mno].model, simvals[1], ds=2, c=c=[:red :blue])
-jacplot(resdiff[mno].models, simvals[1], ds=2, c=[:red :green], true_jacobian,reuse=false, size=(1200,800))
-jacplot!(resaddiff[mno].model, simvals[1], ds=2, c=:magenta)
+jacplot(resdiff[mno].models, simvals[1], ds=2, c=[:red :green], true_jacobian, size=(1200,800), xaxis=false)
+jacplot!(resaddiff[mno].model, simvals[1], ds=2, c=:blue, xaxis=false)
+# savefig3("/local/home/fredrikb/phdthesis/blackbox/figs/jacplot.tex")
+ # savetikz("/local/home/fredrikb/phdthesis/blackbox/figs/jacplot.tex", extra=["""legend style={at={(0.5,1.2)},anchor=south,legend columns=3, legend entries={"Ground truth", "Weight decay", "Jacprop"}},"""])
 gui()
 
 

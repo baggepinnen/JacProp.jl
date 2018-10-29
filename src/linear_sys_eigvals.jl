@@ -68,7 +68,7 @@ function callbacker(epoch, loss,d,trace,model,mt)
     end
 end
 
-num_params = 30
+num_params = 20
 wdecay     = 0
 stepsize   = 0.02
 const sys  = LinearSys(1, nx = 10, N=200, h=0.02, σ0 = 0.01)
@@ -99,7 +99,7 @@ trajs = [Trajectory(generate_data(sys, i)...) for i = 1:3]
 
 
 ## Monte-Carlo evaluation
-num_montecarlo = 12
+num_montecarlo = 4
 it = num_montecarlo ÷ 2
 res = map(1:num_montecarlo) do it
     trajs = [Trajectory(generate_data(sys, i)...) for i = it .+ (1:2)]
@@ -135,7 +135,7 @@ res = map(1:num_montecarlo) do it
     # λ = exp10.(range(-4, stop=3, length=num_montecarlo))[it]
     λ = 0.15
     model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
-    opt       = LTVModels.ADAMOptimizer.(model.w, α = 0.1stepsize)
+    opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize)
     trainerad = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
     for i = 1:2
         trainerad(trajs[i], epochs=0)
@@ -166,6 +166,8 @@ Threads.@threads for trainer=resaddiff  train!(trainer, epochs=300) end
 # serialize("results_linear_eigvals_final", (resdiff,resaddiff))
 # (resdiff,resaddiff) = deserialize("results_linear_eigvals_final")
 
+##
+
 using JacProp: eval_pred, eval_sim, eval_jac, eval_jac2
 λd = getfield.(resdiff, :σdivider)
 λadd = getfield.(resaddiff, :λ)
@@ -175,7 +177,7 @@ infostring = @sprintf("Num hidden: %d, sigma: %2.2f, Montecarlo: %d", num_params
 simvals = [Trajectory(generate_data(sys, i, true)...) for i = 4:6]
 pred  = [eval_pred.(resdiff, (vt,)) eval_pred.(resaddiff, (vt,))]
 sim   = simaverage(vcat([[eval_sim.(resdiff, (simval,)) eval_sim.(resaddiff, (simval,))] for simval in simvals]...), 3)
-sim = [x > 10 ? NaN : x for x in sim]
+# sim = [x > 10 ? NaN : x for x in sim]
 jac = [eval_jac2.(resdiff, (vt,), true_jacobian,3) eval_jac2.(resaddiff, (vt,), true_jacobian,3)]
 
 ## Plot error vs λ regularization parameter
@@ -191,7 +193,7 @@ gui()
 
 
 
-
+##
 using StatPlots
 xticks = (1:2, ["Standard" "Jacprop"])
 xvals = [1 2].*ones(num_montecarlo)
@@ -201,22 +203,22 @@ vio1 = violin(xvals,pred; title="Prediction RMS",ylims=(0,maximum(pred)), common
 vio3 = violin(xvals,(jac); title="Jacobian Error",ylims=(0,maximum(jac)), common...)
 plot(vio1,vio3, colorbar=false, layout=(1,2))
 # savefig3("/local/home/fredrikb/phdthesis/blackbox/figs/boxplot_linear.tex")
+##
+
+# common = (marker_z=xv, legend=false, xticks=false)
+# vio1 = violin([1],pred[:,1]; ylabel="Prediction RMS",  side=:left, ylims=(0,maximum(pred)), common...)
+# violin!([1],pred[:,2]; ylabel="Prediction RMS",  side=:right, ylims=(0,maximum(pred)), common...)
+# vio3 = violin([1],jac[:,1]; ylabel="Jacobian Error", side=:left, ylims=(0,maximum(jac)), common...)
+# violin!([1],jac[:,2]; ylabel="Jacobian Error", side=:right, ylims=(0,maximum(jac)), common...)
+# plot(vio1,vio3, colorbar=false, layout=(1,2))
 
 
-common = (marker_z=xv, legend=false, xticks=false)
-vio1 = violin([1],pred[:,1]; ylabel="Prediction RMS",  side=:left, ylims=(0,maximum(pred)), common...)
-violin!([1],pred[:,2]; ylabel="Prediction RMS",  side=:right, ylims=(0,maximum(pred)), common...)
-vio3 = violin([1],jac[:,1]; ylabel="Jacobian Error", side=:left, ylims=(0,maximum(jac)), common...)
-violin!([1],jac[:,2]; ylabel="Jacobian Error", side=:right, ylims=(0,maximum(jac)), common...)
-plot(vio1,vio3, colorbar=false, layout=(1,2))
 
 
-
-
-#' ## Visualize result
+## Visualize result
 using Plots.PlotMeasures
 F = font(18, "times")
-fontopts = [(:xticks, 0:0.5:1), (:yticks, -0.3:0.3:0.3), (:xlims, (0,1.4)), (:ylims, (-0.5, 0.5)), (:grid, false), (:markeralpha, 0.2), (:ds, 5), (:markerstrokealpha, 0), (:titlefont, F), (:tickfont, F), (:xtickfont, F), (:ytickfont, F), (:guidefont, F), (:xguidefont, F), (:yguidefont, F)]
+fontopts = [(:xticks, 0:0.5:1), (:yticks, -0.3:0.3:0.3), (:xlims, (0,1.4)), (:ylims, (-0.5, 0.5)), (:grid, false), (:markeralpha, 0.2), (:ds, 2), (:markerstrokealpha, 0), (:titlefont, F), (:tickfont, F), (:xtickfont, F), (:ytickfont, F), (:guidefont, F), (:xguidefont, F), (:yguidefont, F)]
 
 # mutregplot(trainer, vt, true_jacobian, title="Witout jacprop", subplot=1, layout=(2,2), reuse=false, useprior=false, showltv=false, legend=false, xaxis=(1:3), xaxis=(1:3))
 # mutregplot!(trainerjn, vt, true_jacobian, title="With jacprop", subplot=2, link=:y, useprior=false, showltv=false, legend=false, xaxis=(1:3))
@@ -225,11 +227,12 @@ fontopts = [(:xticks, 0:0.5:1), (:yticks, -0.3:0.3:0.3), (:xlims, (0,1.4)), (:yl
 
 #' The top row shows the error (Frobenius norm) in the Jacbians for several points sampled randomly in the state space. The bottow row shows the training errors. The training errors are lower without jacprop, but he greater error in the Jacobians for the validation data indicates overfitting, which is prevented by jacprop.
 
-eigvalplot(resdiff[5].models, vt, true_jacobian; title="Weight decay", layout=(1,2), subplot=1, size=(920,280), fontopts...)
+eigvalplot(resdiff[5].models, vt, true_jacobian; title="Weight decay", layout=(1,2), subplot=1, size=(800,290), fontopts...)
 # eigvalplot!(trainerjn.models, vt, true_jacobian;  title="Jacprop", subplot=2, fontopts...)
-eigvalplot!(resaddiff[7].model, vt;  title="Jacprop", subplot=2, fontopts...)
-gui()
-# savefig("/local/home/fredrikb/papers/nn_prior/figs/jacpropeig2.pdf")
+eigvalplot!(resaddiff[7].model, vt, true_jacobian;  title="Jacprop", subplot=2, fontopts...)
+##
+# gui()
+# savefig("/local/home/fredrikb/phdthesis/blackbox/figs/jacpropeig2.pdf")
 # pdftopng -r 300 -aa yes jacpropeig2.pdf jacpropeig2.png
 
 

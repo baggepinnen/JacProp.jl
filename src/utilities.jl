@@ -469,7 +469,7 @@ function eval_jac2(trainer::AbstractModelTrainer, vt, truejacfun, ds=1)
         err = 0mean(abs2.(J1[:,nx+1:end] .- J2[:,nx+1:end]))
         e1,e2 = eigvals(J1[1:nx,1:nx]), eigvals(J2[1:nx,1:nx])
         dm = abs2.(e1 .- e2')
-        dists = max.(minimum(dm, dims=1), minimum(dm, dims=2))
+        dists = minimum(dm, dims=1)[:] + minimum(dm, dims=2)[:]
         err  += sum(dists)
         err
     end |> √

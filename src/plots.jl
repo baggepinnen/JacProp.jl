@@ -181,7 +181,7 @@ jacplot
             getindex.(Jtrue,i)
         end
         @series begin
-            Js == nothing || (ribbon --> 2Js[i,:])
+            # Js == nothing || (ribbon --> 2Js[i,:])
             label --> "Estimated"
             fillalpha --> 0.4
             Jm[i,:]
