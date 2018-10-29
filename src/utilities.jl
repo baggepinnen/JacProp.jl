@@ -91,7 +91,7 @@ tovec(w::Vector{<:Matrix}) = vcat([vec(w) for w in w]...)
 function pred(w,x,nx)
     state = x
     for i=1:2:length(w)-2
-        state = swish.(w[i]*state .+ w[i+1])
+        state = tanh.(w[i]*state .+ w[i+1])
     end
     return w[end-1]*state .+ w[end]
 end
@@ -105,9 +105,9 @@ function pred_jac(w,x,nx)
     for i = 1:2:length(w)-2
         W,b = w[i], w[i+1]
         l   = W*l .+ b
-        ∇σ  = ∇swish!(l)
+        ∇σ  = ∇tanh(l)
         ∇a  = W
-        # l  .= swish.(l) # Reused l to save allocations
+        l  .= tanh.(l) # Reused l to save allocations
         J   = ∇σ * ∇a * J
     end
     J = w[end-1] * J # Linear output layer
