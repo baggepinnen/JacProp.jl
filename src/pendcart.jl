@@ -188,7 +188,6 @@ res = map(1:num_montecarlo) do it
         # λ = 1e-4 # Slow, swish
         # λ = 1 # Slow, tanh
         λ = exp10.(-2.5) # Fast, tanh
-        cb(model) = callbacker#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADDiffSystem(nx,nu,num_params,tanh) # TODO: tanh has no effect
         opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize, expdecay=0.001, ε=1e-2)
         traineradd = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)

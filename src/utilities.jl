@@ -406,9 +406,21 @@ function LTVModels.KalmanModel(ms::AbstractEnsembleSystem, t::Trajectory)
         Jm, Js = jacobian(ms, xu[:,i])
         Jm, Js
     end
-    At = cat(3,[J[i][1][:,1:t.nx] for i = 1:length(t)]...)
-    Bt = cat(3,[J[i][1][:,t.nx+1:end] for i = 1:length(t)]...)
-    Pt = cat(3,[diagm(J[i][2][:]).^2 for i = 1:length(t)]...)
+    At = cat([J[i][1][:,1:t.nx] for i = 1:length(t)]..., dims=3)
+    Bt = cat([J[i][1][:,t.nx+1:end] for i = 1:length(t)]..., dims=3)
+    Pt = cat([diagm(J[i][2][:]).^2 for i = 1:length(t)]..., dims=3)
+    LTVModels.KalmanModel(At,Bt,Pt,true)
+end
+
+function LTVModels.KalmanModel(ms::AbstractSys, t::Trajectory)
+    xu = t.xu
+    N  = size(xu,2)
+    J  = map(1:length(t)) do i
+        jacobian(ms, xu[:,i])
+    end
+    At = cat([J[i][:,1:t.nx] for i = 1:length(t)]..., dims=3)
+    Bt = cat([J[i][:,t.nx+1:end] for i = 1:length(t)]..., dims=3)
+    Pt = cat([eye(length(J[1])) for i = 1:length(t)]..., dims=3)
     LTVModels.KalmanModel(At,Bt,Pt,true)
 end
 
