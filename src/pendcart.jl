@@ -180,7 +180,6 @@ res = map(1:num_montecarlo) do it
         Random.seed!(it)
         # λ = exp10.(range(-6, stop=3, length=num_montecarlo))[it]
         λ = 1e-4
-        cb(model) = callbacker#(jacplot(model, trajs[1], true_jacobian, ds=5,show=true,reuse=true);gui())
         model     = JacProp.ADDiffSystem(nx,nu,num_params,swish) # TODO: swish has no effect
         opt       = LTVModels.ADAMOptimizer.(model.w, α = stepsize, expdecay=0.001, ε=1e-2)
         traineradd = ADModelTrainer(;model=model, opt=opt, λ=λ, testdata = vt)
