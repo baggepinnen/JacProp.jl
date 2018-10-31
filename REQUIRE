@@ -11,3 +11,6 @@ MLDataUtils
 Reexport
 DataStructures
 ReverseDiff
+DSP
+Plots
+DataStructures
