@@ -83,7 +83,7 @@ let h = 0.01, g = 9.82, l = 0.35, d = 1
 
     function true_jacobian(sys::PendcartSys, x::AbstractVector, u::AbstractVector)
         J = true_jacobianc(sys,x,u)
-        ABd = exp([J*sys.h; zeros(nu, nx + nu)])[1:4,:]# ZoH sampling
+        ABd = exp([J*sys.h; zeros(sys.nu, sys.nx + sys.nu)])[1:4,:]# ZoH sampling
     end
 end
 
@@ -99,6 +99,7 @@ function callbacker(epoch, loss,d,trace,model,mt)
         end
     end
 end
+
 
 
 num_params = 30
@@ -219,7 +220,7 @@ Threads.@threads for trainer=resaddiff  train!(trainer, epochs=2500) end
 @info("Done resaddiff")
 
 # serialize("results_fast_tanh_final", (ress,resad,resdiff,resaddiff))
-# (ress,resad,resdiff,resaddiff) = deserialize("results_slow_tanh_final")
+# (ress,resad,resdiff,resaddiff) = deserialize("results_fast_tanh_final")
 using Plots
 using Plots.PlotMeasures
 ##

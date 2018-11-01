@@ -159,6 +159,7 @@ jacplot
 @recipe function jacplot(h::JacPlot; ds=10, cont=false)
     ms = h.args[1]
     t = h.args[2]
+    nx.nu = t.nx, t.nu
     truejac = length(h.args) >= 3
     if truejac
         truejacfun = h.args[3]
@@ -166,16 +167,17 @@ jacplot
     end
     show --> false
     if ms isa LTVModelsBase.LTVStateSpaceModel
-        Jm = reshape(cat(2,ms.At, ms.Bt), :, length(ms))[:,1:ds:end]
+        Jm = reshape(hcat(ms.At, ms.Bt), :, length(ms))[:,1:ds:end]
     else
         Jm,Js = jacobians(ms, t, ds)
     end
     N = size(Jm,1)
-    layout --> N
+    layout --> (nx,nx+nu)
     legend := false
     for i = 1:N
         seriestype --> :line
-        subplot := i
+        rc = lin2rc(i,nx,nx+nu)
+        subplot := rc2lin(rc[2], rc[1], nx)
         truejac && @series begin
             linestyle --> :dash
             getindex.(Jtrue,i)
@@ -193,6 +195,8 @@ jacplot
     nothing
 end
 
+lin2rc(i,rows,cols) = (i-1) % rows + 1, i ÷ rows
+rc2lin(r,c,rows) = (c-1)*rows + r
 
 @userplot MutRegPlot
 """
